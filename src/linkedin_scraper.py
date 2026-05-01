@@ -66,13 +66,23 @@ class LinkedInScraper:
         location: str = "United States",
         num_jobs: int = 50,
         days: int = 30,
+        job_title: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """
         Search LinkedIn for jobs matching the given keywords.
+
+        When job_title is provided it becomes the first (most-weighted) term so
+        LinkedIn returns title-matched results rather than generic skill matches.
         Returns a list of job dicts sorted by posting date descending.
         """
-        query = " ".join(keywords[:8])  # LinkedIn handles up to ~8 keywords well
-        time_filter = _TIME_FILTER.get(days, _TIME_FILTER[30])
+        if job_title:
+            skill_terms = [k for k in keywords if k.lower() != job_title.lower()]
+            query = " ".join([job_title] + skill_terms[:5])
+        else:
+            query = " ".join(keywords[:8])
+
+        # Compute seconds for any number of days (LinkedIn accepts r{seconds})
+        time_filter = _TIME_FILTER.get(days) or f"r{days * 86400}"
         jobs: list[dict[str, Any]] = []
         start = 0
         page_size = 25
