@@ -174,6 +174,181 @@ Resume text (first 3000 chars):
     return base
 
 
+def _ats_score_from_dict(opt_res: dict) -> int:
+    """Compute keyword ATS score directly from an optimised resume dict."""
+    text = " ".join([
+        opt_res.get("name",""),
+        opt_res.get("email",""),
+        opt_res.get("phone",""),
+        opt_res.get("summary",""),
+        " ".join(opt_res.get("technical_skills",[])),
+        " ".join(opt_res.get("tools",[])),
+        " ".join(opt_res.get("frameworks",[])),
+        " ".join(opt_res.get("soft_skills",[])),
+        " ".join(e.get("title","") + " " + e.get("company","") + " " +
+                 " ".join(e.get("achievements",[])) for e in opt_res.get("experience",[])),
+        " ".join(e.get("degree","") + " " + e.get("institution","")
+                 for e in opt_res.get("education",[])),
+    ])
+    word_count = len(text.split())
+    all_kw = [w.lower() for w in text.split() if len(w) > 2]
+
+    from src.fallback_extractor import _TECH
+    kw_count = sum(1 for kw in _TECH if kw in text.lower())
+
+    checks = {
+        "contact_info":   bool(opt_res.get("email") and opt_res.get("phone")),
+        "summary":        bool(opt_res.get("summary") and len(opt_res.get("summary","")) > 30),
+        "skills_section": len(opt_res.get("technical_skills",[])) > 0,
+        "experience":     len(opt_res.get("experience",[])) > 0,
+        "education":      len(opt_res.get("education",[])) > 0,
+        "keywords":       kw_count >= 10,
+        "length":         400 <= word_count <= 1200,
+    }
+    pts = {"contact_info":20,"summary":15,"skills_section":15,
+           "experience":20,"education":10,"keywords":10,"length":10}
+    return sum(pts[k] for k, v in checks.items() if v)
+
+
+def _render_opt_resume(opt_res: dict, original_ats: int, job_title: str,
+                       company: str, jurl: str, key_prefix: str):
+    """Render full optimised resume preview with before/after ATS score and downloads."""
+    import tempfile as _tf
+    from pathlib import Path as _Path
+
+    opt_ats = _ats_score_from_dict(opt_res)
+
+    # ── Before / After ATS score ──────────────────────────────────────────────
+    st.markdown("#### ATS Score")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("Before", f"{original_ats}/100")
+    delta = opt_ats - original_ats
+    s2.metric("After optimisation", f"{opt_ats}/100",
+              delta=f"+{delta}" if delta >= 0 else str(delta))
+    s3.metric("Target job", job_title or "—")
+
+    st.divider()
+
+    # ── Full resume preview ───────────────────────────────────────────────────
+    st.markdown("#### Optimised Resume Preview")
+
+    name    = opt_res.get("name","")
+    email   = opt_res.get("email","")
+    phone   = opt_res.get("phone","")
+    loc     = opt_res.get("location","")
+    contact = " | ".join(p for p in [email, phone, loc] if p)
+
+    st.markdown(f"## {name}")
+    if contact:
+        st.caption(contact)
+
+    if opt_res.get("summary"):
+        st.markdown("**Professional Summary**")
+        st.info(opt_res["summary"])
+
+    # Skills
+    all_tech = list(dict.fromkeys(
+        opt_res.get("technical_skills",[]) +
+        opt_res.get("frameworks",[]) +
+        opt_res.get("tools",[]) +
+        opt_res.get("languages",[])))
+    if all_tech:
+        st.markdown("**Skills**")
+        st.markdown(
+            " ".join(f'<span class="badge badge-blue">{s}</span>' for s in all_tech),
+            unsafe_allow_html=True)
+        if opt_res.get("soft_skills"):
+            st.caption("Soft skills: " + ", ".join(opt_res["soft_skills"]))
+
+    # Experience
+    if opt_res.get("experience"):
+        st.markdown("**Work Experience**")
+        for exp in opt_res["experience"]:
+            st.markdown(
+                f"**{exp.get('title','')}** — {exp.get('company','')}  "
+                f"*{exp.get('duration','')}*")
+            for ach in exp.get("achievements",[]):
+                st.markdown(f"&nbsp;&nbsp;• {ach}")
+
+    # Projects
+    if opt_res.get("projects"):
+        st.markdown("**Projects**")
+        for proj in opt_res["projects"]:
+            techs = ", ".join(proj.get("technologies",[]))
+            st.markdown(f"**{proj.get('name','')}** `[{techs}]`")
+            if proj.get("description"):
+                st.markdown(f"&nbsp;&nbsp;{proj['description']}")
+
+    # Education
+    if opt_res.get("education"):
+        st.markdown("**Education**")
+        for edu in opt_res["education"]:
+            st.markdown(
+                f"**{edu.get('degree','')}** — {edu.get('institution','')}  "
+                f"{edu.get('year','')}")
+
+    # Certifications
+    if opt_res.get("certifications"):
+        st.markdown("**Certifications**")
+        for cert in opt_res["certifications"]:
+            st.markdown(f"• {cert}")
+
+    st.divider()
+
+    # ── What changed ─────────────────────────────────────────────────────────
+    if opt_res.get("optimization_notes") or opt_res.get("added_keywords"):
+        st.markdown("#### What Was Changed")
+        if opt_res.get("optimization_notes"):
+            for n in opt_res["optimization_notes"][:8]:
+                st.markdown(f"✓ {n}")
+        if opt_res.get("added_keywords"):
+            st.markdown(
+                "**Keywords added:** "
+                + " ".join(f'<span class="badge badge-green">{k}</span>'
+                           for k in opt_res["added_keywords"][:12]),
+                unsafe_allow_html=True)
+        st.divider()
+
+    # ── Download buttons ──────────────────────────────────────────────────────
+    st.markdown("#### Download")
+    dc, dd = st.columns(2)
+    safe_co = (company or "job").replace(" ","_")[:14]
+
+    with dc:
+        try:
+            from src.resume_generator import ResumeGenerator
+            gen = ResumeGenerator()
+            with _tf.NamedTemporaryFile(delete=False, suffix=".pdf") as tp:
+                gen.generate_pdf(opt_res, tp.name)
+                pdf_bytes = _Path(tp.name).read_bytes()
+                import os as _os2; _os2.unlink(tp.name)
+            st.download_button("⬇ Download PDF", pdf_bytes,
+                               f"resume_{safe_co}.pdf", "application/pdf",
+                               key=f"{key_prefix}_pdf",
+                               use_container_width=True, type="primary")
+        except Exception as e:
+            st.error(f"PDF error: {e}")
+
+    with dd:
+        try:
+            from src.resume_generator import ResumeGenerator
+            gen = ResumeGenerator()
+            with _tf.NamedTemporaryFile(delete=False, suffix=".md", mode="w") as tm:
+                gen.generate_markdown(opt_res, tm.name)
+                md_text = _Path(tm.name).read_text()
+                import os as _os2; _os2.unlink(tm.name)
+            st.download_button("⬇ Download Markdown", md_text,
+                               f"resume_{safe_co}.md", "text/markdown",
+                               key=f"{key_prefix}_md",
+                               use_container_width=True)
+        except Exception as e:
+            st.error(f"Markdown error: {e}")
+
+    if jurl:
+        st.link_button("🚀 Apply Now with This Resume →", jurl,
+                       use_container_width=True)
+
+
 @st.cache_resource
 def _get_ai_client(provider: str, google_key: str, anthropic_key: str):
     from src.ai_client import AIClient
@@ -719,55 +894,12 @@ with tab_jobs:
 
                 if jid in st.session_state.per_job_opt:
                     opt_res = st.session_state.per_job_opt[jid]
-                    with st.expander("📄 Optimised Resume — Preview & Download",
+                    with st.expander("📄 Optimised Resume — Full Preview & Download",
                                      expanded=True):
-                        dc, dd = st.columns(2)
-                        with dc:
-                            try:
-                                from src.resume_generator import ResumeGenerator
-                                gen = ResumeGenerator()
-                                with tempfile.NamedTemporaryFile(
-                                    delete=False, suffix=".pdf"
-                                ) as tp:
-                                    gen.generate_pdf(opt_res, tp.name)
-                                    pdf_bytes = Path(tp.name).read_bytes()
-                                    import os as _os; _os.unlink(tp.name)
-                                st.download_button(
-                                    "⬇ Download PDF", pdf_bytes,
-                                    f"resume_{company.replace(' ','_')[:12]}.pdf",
-                                    "application/pdf", key=f"dlpdf_{jid}",
-                                    use_container_width=True, type="primary")
-                            except Exception as e:
-                                st.error(f"PDF error: {e}")
-                        with dd:
-                            from src.resume_generator import ResumeGenerator
-                            gen = ResumeGenerator()
-                            with tempfile.NamedTemporaryFile(
-                                delete=False, suffix=".md", mode="w"
-                            ) as tm:
-                                gen.generate_markdown(opt_res, tm.name)
-                                md_text = Path(tm.name).read_text()
-                                import os as _os; _os.unlink(tm.name)
-                            st.download_button(
-                                "⬇ Download Markdown", md_text,
-                                f"resume_{company.replace(' ','_')[:12]}.md",
-                                "text/markdown", key=f"dlmd_{jid}",
-                                use_container_width=True)
-
-                        if opt_res.get("optimization_notes"):
-                            st.markdown("**Changes made:**")
-                            for n in opt_res["optimization_notes"][:6]:
-                                st.markdown(f"✓ {n}")
-                        if opt_res.get("added_keywords"):
-                            st.markdown(
-                                "**Keywords added:** "
-                                + " ".join(
-                                    f'<span class="badge badge-green">{k}</span>'
-                                    for k in opt_res["added_keywords"][:10]),
-                                unsafe_allow_html=True)
-                        if jurl:
-                            st.link_button("🚀 Apply Now with This Resume →",
-                                           jurl, use_container_width=True)
+                        orig_ats = st.session_state.get("ats_audit", {}).get("score", 0)
+                        _render_opt_resume(
+                            opt_res, orig_ats, title, company,
+                            jurl, key_prefix=f"pj_{jid}")
 
         # ── Bulk add to queue ─────────────────────────────────────────────────
         if filtered:
@@ -810,64 +942,25 @@ with tab_resume:
             "or use the **✨ Optimize My Resume for This Job** button on any job card."
         )
     else:
-        from src.resume_generator import ResumeGenerator
-        gen = ResumeGenerator()
+        orig_ats = st.session_state.get("ats_audit", {}).get("score", 0)
 
         for i, item in enumerate(st.session_state.top_optimized, 1):
-            job = item["job"]; opt = item["optimized_resume"]; score = item.get("match_score",0)
-            st.markdown(
-                f"#### {i}. {job.get('title')} — {job.get('company')} "
-                f"{score_badge(score)}",
-                unsafe_allow_html=True)
+            job   = item["job"]
+            opt   = item["optimized_resume"]
+            score = item.get("match_score", 0)
+            jtitle   = job.get("title","") or "Unknown Position"
+            jcompany = job.get("company","") or "Unknown Company"
 
-            ca, cb = st.columns(2)
-            # PDF
-            with ca:
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tp:
-                        gen.generate_pdf(opt, tp.name)
-                        pdf_bytes = Path(tp.name).read_bytes()
-                        import os as _os; _os.unlink(tp.name)
-                    st.download_button("⬇ Download PDF",
-                                       pdf_bytes,
-                                       f"resume_{job.get('company','').replace(' ','_')[:12]}_{i}.pdf",
-                                       "application/pdf",
-                                       key=f"bpdf_{i}",
-                                       use_container_width=True, type="primary")
-                except Exception as e:
-                    st.error(f"PDF error: {e}")
-            # Markdown
-            with cb:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w") as tm:
-                    gen.generate_markdown(opt, tm.name)
-                    md_text = Path(tm.name).read_text()
-                    import os as _os; _os.unlink(tm.name)
-                st.download_button("⬇ Download Markdown", md_text,
-                                   f"resume_{job.get('company','').replace(' ','_')[:12]}_{i}.md",
-                                   "text/markdown", key=f"bmd_{i}",
-                                   use_container_width=True)
+            with st.container(border=True):
+                h1, h2 = st.columns([5, 1])
+                with h1:
+                    st.markdown(f"### {i}. {jtitle} — {jcompany}")
+                with h2:
+                    st.markdown(score_badge(score), unsafe_allow_html=True)
 
-            if job.get("url"):
-                st.link_button("🚀 Apply Now →", job["url"], use_container_width=False)
-
-            with st.expander("Preview changes"):
-                cx, cy = st.columns([2,1])
-                with cx:
-                    st.markdown(f"**Summary:** {opt.get('summary','')}")
-                    sk = list(dict.fromkeys(opt.get("technical_skills",[])
-                                           + opt.get("frameworks",[])
-                                           + opt.get("tools",[])))
-                    st.markdown(
-                        " ".join(f'<span class="badge badge-blue">{s}</span>' for s in sk),
-                        unsafe_allow_html=True)
-                with cy:
-                    for n in opt.get("optimization_notes",[])[:5]:
-                        st.markdown(f"✓ {n}")
-                    st.markdown(
-                        " ".join(f'<span class="badge badge-green">{k}</span>'
-                                 for k in opt.get("added_keywords",[])[:8]),
-                        unsafe_allow_html=True)
-            st.divider()
+                _render_opt_resume(
+                    opt, orig_ats, jtitle, jcompany,
+                    job.get("url",""), key_prefix=f"bulk_{i}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
