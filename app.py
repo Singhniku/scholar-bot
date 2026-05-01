@@ -174,6 +174,83 @@ Resume text (first 3000 chars):
     return base
 
 
+def _normalize_resume(rd: Any) -> dict:
+    """
+    Ensure resume_data is a dict with the expected shape and types.
+    Handles AI/JSON outputs that may return strings where lists are expected,
+    or dicts where lists of dicts are expected.
+    """
+    if not isinstance(rd, dict):
+        return {}
+
+    def _as_list(v):
+        if v is None: return []
+        if isinstance(v, list): return v
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return [v]
+
+    def _as_str(v):
+        if v is None: return ""
+        if isinstance(v, (list, tuple)):
+            return ", ".join(str(x) for x in v)
+        return str(v)
+
+    def _as_int(v):
+        try:    return int(v) if v not in (None, "") else 0
+        except (TypeError, ValueError): return 0
+
+    norm: dict = {}
+    for k in ("name","email","phone","location","linkedin","summary","current_title"):
+        norm[k] = _as_str(rd.get(k, ""))
+    norm["experience_years"] = _as_int(rd.get("experience_years", 0))
+
+    for k in ("technical_skills","soft_skills","tools","languages","frameworks",
+              "certifications","all_keywords","optimization_notes","added_keywords"):
+        norm[k] = [_as_str(x) for x in _as_list(rd.get(k, []))]
+
+    # Experience: list of dicts
+    exp_norm: list[dict] = []
+    for e in _as_list(rd.get("experience", [])):
+        if isinstance(e, dict):
+            exp_norm.append({
+                "title":         _as_str(e.get("title","")),
+                "company":       _as_str(e.get("company","")),
+                "duration":      _as_str(e.get("duration","")),
+                "location":      _as_str(e.get("location","")),
+                "achievements":  [_as_str(a) for a in _as_list(e.get("achievements",[]))],
+            })
+    norm["experience"] = exp_norm
+
+    # Education
+    edu_norm: list[dict] = []
+    for e in _as_list(rd.get("education", [])):
+        if isinstance(e, dict):
+            edu_norm.append({
+                "institution": _as_str(e.get("institution","")),
+                "degree":      _as_str(e.get("degree","")),
+                "year":        _as_str(e.get("year","")),
+                "gpa":         _as_str(e.get("gpa","")),
+            })
+        elif isinstance(e, str):
+            edu_norm.append({"institution": e, "degree":"", "year":"", "gpa":""})
+    norm["education"] = edu_norm
+
+    # Projects
+    proj_norm: list[dict] = []
+    for p in _as_list(rd.get("projects", [])):
+        if isinstance(p, dict):
+            proj_norm.append({
+                "name":         _as_str(p.get("name","")),
+                "description":  _as_str(p.get("description","")),
+                "technologies": [_as_str(t) for t in _as_list(p.get("technologies",[]))],
+            })
+    norm["projects"] = proj_norm
+
+    norm["_fallback"] = bool(rd.get("_fallback", False))
+    return norm
+
+
 def _ats_score_from_dict(opt_res: dict) -> int:
     """Compute keyword ATS score directly from an optimised resume dict."""
     text = " ".join([
@@ -216,6 +293,7 @@ def _render_opt_resume(opt_res: dict, original_ats: int, job_title: str,
     import tempfile as _tf
     from pathlib import Path as _Path
 
+    opt_res = _normalize_resume(opt_res)
     opt_ats = _ats_score_from_dict(opt_res)
 
     # ── Before / After ATS score ──────────────────────────────────────────────
@@ -516,7 +594,8 @@ with tab_upload:
                     st.session_state.ai_used = False
                     s.update(label="Keyword extraction complete", state="complete")
 
-            st.session_state.resume_data = rd
+            st.session_state.resume_data = _normalize_resume(rd)
+            rd = st.session_state.resume_data
 
             # ── ATS audit (always runs after extraction) ─────────────────────
             with st.status("Running ATS audit…", expanded=True) as s:
@@ -659,6 +738,34 @@ with tab_upload:
                 unsafe_allow_html=True)
         if rd.get("summary"):
             st.info(rd["summary"][:400])
+
+        if rd.get("experience"):
+            with st.expander(f"💼 Work Experience ({len(rd['experience'])} roles)",
+                             expanded=True):
+                for exp in rd["experience"]:
+                    title    = exp.get("title", "")
+                    company  = exp.get("company", "")
+                    duration = exp.get("duration", "")
+                    location = exp.get("location", "")
+                    head_bits = " — ".join(b for b in [title, company] if b)
+                    sub_bits  = " | ".join(b for b in [duration, location] if b)
+                    if head_bits:
+                        st.markdown(f"**{head_bits}**")
+                    if sub_bits:
+                        st.caption(sub_bits)
+                    for ach in exp.get("achievements", []):
+                        st.markdown(f"&nbsp;&nbsp;• {ach}")
+                    st.markdown("")
+
+        if rd.get("education"):
+            with st.expander(f"🎓 Education ({len(rd['education'])} entries)",
+                             expanded=False):
+                for edu in rd["education"]:
+                    bits = " · ".join(b for b in [
+                        edu.get("degree",""), edu.get("institution",""),
+                        edu.get("year",""), edu.get("gpa",""),
+                    ] if b)
+                    st.markdown(f"• {bits}")
 
         # ── ATS Score panel ───────────────────────────────────────────────────
         if ats:
