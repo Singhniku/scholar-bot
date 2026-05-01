@@ -215,8 +215,12 @@ scholar-bot/
 
 | Key | Where to get it | Required? |
 |-----|----------------|-----------|
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) | **Yes** |
-| LinkedIn email + password | Your LinkedIn account | Only for Auto Apply |
+| `GOOGLE_API_KEY` | [aistudio.google.com](https://aistudio.google.com) | Recommended (free tier) |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) | Alternative to Gemini |
+| `LINKEDIN_PROFILE_URL` | Your public LinkedIn profile URL | Optional — shown on resume + pre-fills Easy Apply forms |
+| `LINKEDIN_EMAIL` + `LINKEDIN_PASSWORD` | Your LinkedIn account | Optional — **only** needed to enable the Auto Apply tab |
+
+> Scholar-Bot runs end-to-end (resume parsing, job search, match scoring, ATS optimisation, PDF download) with just an AI key. Your LinkedIn password is **not** required unless you specifically want the bot to submit Easy Apply forms for you.
 
 ---
 
@@ -281,17 +285,24 @@ cp .env.example .env
 Edit `.env`:
 
 ```dotenv
-# Required
+# Required — at least one AI key
+GOOGLE_API_KEY=...            # free at aistudio.google.com
+# or
 ANTHROPIC_API_KEY=sk-ant-api03-...
 
-# Required only for Auto Apply
-LINKEDIN_EMAIL=you@example.com
-LINKEDIN_PASSWORD=yourpassword
+# Optional — appears on generated resumes and pre-fills the "LinkedIn URL"
+# question on Easy Apply forms
+LINKEDIN_PROFILE_URL=https://www.linkedin.com/in/your-handle
+
+# Optional — ONLY required to enable the Auto Apply tab. The rest of the app
+# (job search, matching, resume optimisation, downloads) works without these.
+LINKEDIN_EMAIL=
+LINKEDIN_PASSWORD=
 
 # Optional tuning
 DEFAULT_LOCATION=United States
 DEFAULT_NUM_JOBS=50
-JOB_SEARCH_DAYS=30       # 1, 7, or 30
+JOB_SEARCH_DAYS=30
 OUTPUT_DIR=./output
 ```
 

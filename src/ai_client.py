@@ -84,15 +84,19 @@ class AIClient:
         user: str,
         max_tokens: int = 4096,
         retries: int = 3,
+        json_mode: bool = True,
     ) -> str:
         """
         Generate text from a system + user prompt.
         Automatically retries on rate-limit (429) errors with exponential back-off.
+
+        json_mode=True (default) asks Gemini to return application/json, which
+        eliminates markdown fencing and stray prose. Ignored for Anthropic.
         """
         for attempt in range(1, retries + 1):
             try:
                 if self.provider == "gemini":
-                    return self._gemini_generate(system, user, max_tokens)
+                    return self._gemini_generate(system, user, max_tokens, json_mode)
                 else:
                     return self._anthropic_generate(system, user, max_tokens)
             except Exception as e:
@@ -112,27 +116,40 @@ class AIClient:
         "models/gemini-2.0-flash-lite",
     ]
 
-    def _gemini_generate(self, system: str, user: str, max_tokens: int) -> str:
+    def _gemini_generate(self, system: str, user: str, max_tokens: int, json_mode: bool) -> str:
         types = self._genai_types
         models_to_try = (
             [self.model]
             + [m for m in self._GEMINI_FALLBACK_ORDER if m != self.model]
         )
+
+        # Gemini 2.5 "thinking" models silently spend max_output_tokens on a
+        # hidden reasoning budget, which truncates the visible JSON and makes
+        # downstream parsing fail. Disable thinking on models that support it.
+        config_kwargs = dict(
+            system_instruction=system,
+            max_output_tokens=max_tokens,
+            temperature=0.2,
+        )
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+        try:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        except Exception:
+            # Older SDKs / non-thinking models — omit silently.
+            pass
+
         last_err = None
         for model_name in models_to_try:
             try:
                 response = self._genai_client.models.generate_content(
                     model=model_name,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        max_output_tokens=max_tokens,
-                        temperature=0.2,
-                    ),
+                    config=types.GenerateContentConfig(**config_kwargs),
                     contents=user,
                 )
                 if model_name != self.model:
                     logger.info(f"Using fallback Gemini model: {model_name}")
-                return response.text.strip()
+                return (response.text or "").strip()
             except Exception as e:
                 err = str(e)
                 if "429" in err or "quota" in err.lower() or "exhausted" in err.lower():

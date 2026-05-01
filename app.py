@@ -236,7 +236,8 @@ def _render_opt_resume(opt_res: dict, original_ats: int, job_title: str,
     email   = opt_res.get("email","")
     phone   = opt_res.get("phone","")
     loc     = opt_res.get("location","")
-    contact = " | ".join(p for p in [email, phone, loc] if p)
+    li_url  = opt_res.get("linkedin_url","")
+    contact = " | ".join(p for p in [email, phone, loc, li_url] if p)
 
     st.markdown(f"## {name}")
     if contact:
@@ -425,15 +426,46 @@ with st.sidebar:
     optimize_top = st.slider("Auto-optimise Top N Jobs", 1, 5, 3)
 
     st.divider()
-    st.markdown("### 🤖 Auto-Apply")
-    li_email    = st.text_input("LinkedIn Email",    value=os.getenv("LINKEDIN_EMAIL",""))
-    li_password = st.text_input("LinkedIn Password", value=os.getenv("LINKEDIN_PASSWORD",""),
-                                 type="password")
-    headless    = st.checkbox("Headless browser", value=False)
+    st.markdown("### 🔗 LinkedIn")
+    li_profile_url = st.text_input(
+        "Profile URL",
+        value=os.getenv("LINKEDIN_PROFILE_URL", ""),
+        placeholder="https://www.linkedin.com/in/your-handle",
+        help="Optional. Added to generated resumes and used to pre-fill the "
+             "LinkedIn URL field on Easy Apply forms.",
+    )
+
+    env_email    = os.getenv("LINKEDIN_EMAIL", "")
+    env_password = os.getenv("LINKEDIN_PASSWORD", "")
+    with st.expander(
+        "🤖 Enable Auto-Apply (optional)",
+        expanded=bool(env_email and env_password),
+    ):
+        st.caption(
+            "Auto-Apply signs in to LinkedIn in a Chrome window to fill Easy "
+            "Apply forms on your behalf. Leave blank to use the app without it — "
+            "job search, matching, and resume optimisation all work without logging in."
+        )
+        li_email    = st.text_input("LinkedIn Email",    value=env_email)
+        li_password = st.text_input("LinkedIn Password", value=env_password,
+                                     type="password")
+        headless    = st.checkbox("Headless browser", value=False)
     st.divider()
     st.caption(f"Scholar-Bot v1.0 · {'Gemini (free)' if ai_provider=='gemini' else 'Claude'}")
 
 has_ai = _ai_available(ai_provider, google_key, anthropic_key)
+auto_apply_enabled = bool(li_email and li_password)
+
+# The LinkedIn profile URL is a live sidebar value — propagate it to any
+# resume dicts we've already produced so PDFs/previews stay in sync without
+# re-running the pipeline.
+if li_profile_url:
+    if st.session_state.resume_data is not None:
+        st.session_state.resume_data["linkedin_url"] = li_profile_url
+    for _opt in st.session_state.per_job_opt.values():
+        _opt["linkedin_url"] = li_profile_url
+    for _item in (st.session_state.top_optimized or []):
+        _item["optimized_resume"]["linkedin_url"] = li_profile_url
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown(
@@ -500,15 +532,28 @@ with tab_upload:
                     try:
                         ext = _get_extractor(ai_provider, google_key, anthropic_key)
                         rd  = ext.extract_from_resume(text)
-                        st.session_state.ai_used = True
-                        s.update(label=f"AI extracted {len(rd.get('technical_skills',[]))} skills",
-                                 state="complete")
                     except Exception as e:
                         st.warning(f"AI quota hit — switching to keyword mode. ({e})")
+                        rd = {}
+
+                    # Empty dict = AI returned nothing parseable. Fall back so
+                    # the rest of the pipeline doesn't run on zero skills.
+                    skill_count = len(rd.get("technical_skills", []) or []) \
+                                + len(rd.get("tools", []) or []) \
+                                + len(rd.get("frameworks", []) or [])
+                    if skill_count == 0:
+                        st.warning(
+                            "AI extraction returned no skills (likely a truncated "
+                            "JSON response). Falling back to keyword extraction."
+                        )
                         from src.fallback_extractor import extract_resume
                         rd = extract_resume(text)
                         st.session_state.ai_used = False
-                        s.update(label="Keyword extraction (fallback)", state="complete")
+                        s.update(label="Keyword extraction (AI fallback)", state="complete")
+                    else:
+                        st.session_state.ai_used = True
+                        s.update(label=f"AI extracted {skill_count} skills",
+                                 state="complete")
             else:
                 with st.status("Extracting skills (keyword mode)…", expanded=True) as s:
                     from src.fallback_extractor import extract_resume
@@ -517,6 +562,8 @@ with tab_upload:
                     s.update(label="Keyword extraction complete", state="complete")
 
             st.session_state.resume_data = rd
+            if li_profile_url:
+                rd["linkedin_url"] = li_profile_url
 
             # ── ATS audit (always runs after extraction) ─────────────────────
             with st.status("Running ATS audit…", expanded=True) as s:
@@ -540,6 +587,16 @@ with tab_upload:
                 else:
                     search_keywords = skills[:10]
                     search_label    = "resume skills"
+
+                # Refuse to search with an empty query — LinkedIn will happily
+                # return a pile of unrelated jobs otherwise.
+                if not any(k.strip() for k in search_keywords):
+                    st.error(
+                        "No search terms available — the resume extractor returned no "
+                        "skills and no **Job Title** was entered. Add a job title in "
+                        "the sidebar and click **Find Jobs** again."
+                    )
+                    st.stop()
 
                 with st.status(
                     f"Searching LinkedIn for {search_label} in {location}…",
@@ -608,6 +665,11 @@ with tab_upload:
                         try:
                             opt = _get_optimizer(ai_provider, google_key, anthropic_key)
                             top = opt.bulk_optimize(rd, ranked, top_n=optimize_top)
+                            # ATSOptimizer drops fields outside its schema — re-attach the
+                            # LinkedIn URL so the first-run PDFs carry it.
+                            if li_profile_url:
+                                for item in top:
+                                    item["optimized_resume"]["linkedin_url"] = li_profile_url
                             st.session_state.top_optimized = top
 
                             from src.resume_generator import ResumeGenerator
@@ -887,6 +949,8 @@ with tab_jobs:
                             opt = _get_optimizer(ai_provider, google_key, anthropic_key)
                             result = opt.optimize_resume(
                                 rd, r["job_requirements"], r["match_analysis"])
+                            if li_profile_url:
+                                result["linkedin_url"] = li_profile_url
                             st.session_state.per_job_opt[jid] = result
                             st.success("Optimised! Expand the section below to download.")
                         except Exception as e:
@@ -970,103 +1034,110 @@ with tab_apply:
     st.markdown("### 🚀 Auto Apply")
     st.caption("Scholar-Bot fills every Easy Apply form and pauses for your review before submitting.")
 
-    if not li_email or not li_password:
-        st.warning("Enter your LinkedIn credentials in the sidebar.")
-
-    queue = st.session_state.apply_queue
-    if not queue:
-        st.info("No jobs queued. Use the **➕ Queue** button on job cards in **Job Matches**.")
+    if not auto_apply_enabled:
+        st.info(
+            "**Auto-Apply is optional and currently disabled.**\n\n"
+            "This feature drives a real Chrome browser, signs in to LinkedIn with your "
+            "email + password, and submits Easy Apply forms on your behalf. To enable it, "
+            "open **🤖 Enable Auto-Apply (optional)** in the sidebar and fill in your "
+            "LinkedIn credentials.\n\n"
+            "Everything else in Scholar-Bot — job search, match scoring, resume "
+            "optimisation, PDF/Markdown downloads — works without logging in."
+        )
     else:
-        st.markdown(f"**{len(queue)} job(s) in queue:**")
-        to_remove = []
-        for j in queue:
-            c1, c2 = st.columns([5,1])
-            c1.markdown(f"• **{j.get('title')}** @ {j.get('company')} — {j.get('location','')}")
-            if c2.button("Remove", key=f"rm_{j.get('job_id',j.get('title',''))}"):
-                to_remove.append(j)
-        for j in to_remove:
-            st.session_state.apply_queue.remove(j)
-        if to_remove:
-            st.rerun()
+        queue = st.session_state.apply_queue
+        if not queue:
+            st.info("No jobs queued. Use the **➕ Queue** button on job cards in **Job Matches**.")
+        else:
+            st.markdown(f"**{len(queue)} job(s) in queue:**")
+            to_remove = []
+            for j in queue:
+                c1, c2 = st.columns([5,1])
+                c1.markdown(f"• **{j.get('title')}** @ {j.get('company')} — {j.get('location','')}")
+                if c2.button("Remove", key=f"rm_{j.get('job_id',j.get('title',''))}"):
+                    to_remove.append(j)
+            for j in to_remove:
+                st.session_state.apply_queue.remove(j)
+            if to_remove:
+                st.rerun()
 
-        st.divider()
-        rd       = st.session_state.resume_data
-        opt_pdfs = st.session_state.opt_pdf_paths
-
-        def _pick_pdf(job):
-            jid = job.get("job_id","")
-            return (opt_pdfs.get(jid) or next(iter(opt_pdfs.values()), "")) if opt_pdfs else ""
-
-        can_start = (li_email and li_password and rd
-                     and not st.session_state.apply_thread_running)
-
-        if st.button("▶ Start Auto Apply", type="primary", disabled=not can_start):
-            from src.auto_apply import AutoApply, ApplicationStatus
-
-            status_map, screenshot_map = {}, {}
-
-            def on_status(job_id, status, screenshot):
-                status_map[job_id] = status
-                if screenshot:
-                    screenshot_map[job_id] = screenshot
-                st.session_state.apply_status_map     = dict(status_map)
-                st.session_state.apply_screenshot_map = dict(screenshot_map)
-
-            applier = AutoApply(
-                email=li_email, password=li_password,
-                resume_data=rd, resume_pdf_path=_pick_pdf(queue[0]),
-                headless=headless, on_status=on_status)
-            st.session_state.applier = applier
-
-            def _run():
-                st.session_state.apply_thread_running = True
-                st.session_state.apply_results = applier.apply_to_jobs(queue)
-                st.session_state.apply_thread_running = False
-
-            threading.Thread(target=_run, daemon=True).start()
-            st.info("Auto-apply started. Review status below.")
-
-        if st.session_state.apply_thread_running or st.session_state.apply_results:
             st.divider()
-            st.markdown("#### Application Status")
-            status_map     = st.session_state.apply_status_map
-            screenshot_map = st.session_state.apply_screenshot_map
-            applier        = st.session_state.applier
+            rd       = st.session_state.resume_data
+            opt_pdfs = st.session_state.opt_pdf_paths
 
-            for job in queue:
-                jid    = job.get("job_id","")
-                status = status_map.get(jid, "pending")
-                colour = {"done":"#155724","failed":"#721c24",
-                          "waiting_approval":"#856404"}.get(status,"#004085")
-                st.markdown(
-                    f'<b style="color:{colour}">{job.get("title")} @ {job.get("company")}</b>'
-                    f' — <code>{status.replace("_"," ").upper()}</code>',
-                    unsafe_allow_html=True)
+            def _pick_pdf(job):
+                jid = job.get("job_id","")
+                return (opt_pdfs.get(jid) or next(iter(opt_pdfs.values()), "")) if opt_pdfs else ""
 
-                if status == "waiting_approval" and applier:
-                    if jid in screenshot_map:
-                        img_bytes = base64.b64decode(screenshot_map[jid])
-                        st.image(img_bytes, caption="Application preview",
-                                 use_container_width=True)
-                    st.markdown("**Review the form, then click Submit or Skip.**")
-                    b1, b2 = st.columns(2)
-                    if b1.button("✅ Submit Application", key=f"sub_{jid}", type="primary"):
-                        applier.signal_submit(approve=True)
-                        st.success("Submitted!")
-                    if b2.button("⏭ Skip", key=f"skip_{jid}"):
-                        applier.signal_submit(approve=False)
+            can_start = (rd and not st.session_state.apply_thread_running)
 
-            if st.session_state.apply_results:
+            if st.button("▶ Start Auto Apply", type="primary", disabled=not can_start):
+                from src.auto_apply import AutoApply, ApplicationStatus
+
+                status_map, screenshot_map = {}, {}
+
+                def on_status(job_id, status, screenshot):
+                    status_map[job_id] = status
+                    if screenshot:
+                        screenshot_map[job_id] = screenshot
+                    st.session_state.apply_status_map     = dict(status_map)
+                    st.session_state.apply_screenshot_map = dict(screenshot_map)
+
+                applier = AutoApply(
+                    email=li_email, password=li_password,
+                    resume_data=rd, resume_pdf_path=_pick_pdf(queue[0]),
+                    headless=headless, on_status=on_status)
+                st.session_state.applier = applier
+
+                def _run():
+                    st.session_state.apply_thread_running = True
+                    st.session_state.apply_results = applier.apply_to_jobs(queue)
+                    st.session_state.apply_thread_running = False
+
+                threading.Thread(target=_run, daemon=True).start()
+                st.info("Auto-apply started. Review status below.")
+
+            if st.session_state.apply_thread_running or st.session_state.apply_results:
                 st.divider()
-                st.markdown("#### Results")
-                for r in st.session_state.apply_results:
-                    icon = {"done":"✅","failed":"❌","skipped":"⏭"}.get(r.get("status",""),"•")
-                    st.markdown(f"{icon} **{r.get('title')} @ {r.get('company')}** — "
-                                f"{r.get('status','').upper()}"
-                                + (f" _{r.get('error','')}_" if r.get("error") else ""))
+                st.markdown("#### Application Status")
+                status_map     = st.session_state.apply_status_map
+                screenshot_map = st.session_state.apply_screenshot_map
+                applier        = st.session_state.applier
 
-            if st.session_state.apply_thread_running:
-                st.info("Applying… refresh to see updates.")
+                for job in queue:
+                    jid    = job.get("job_id","")
+                    status = status_map.get(jid, "pending")
+                    colour = {"done":"#155724","failed":"#721c24",
+                              "waiting_approval":"#856404"}.get(status,"#004085")
+                    st.markdown(
+                        f'<b style="color:{colour}">{job.get("title")} @ {job.get("company")}</b>'
+                        f' — <code>{status.replace("_"," ").upper()}</code>',
+                        unsafe_allow_html=True)
+
+                    if status == "waiting_approval" and applier:
+                        if jid in screenshot_map:
+                            img_bytes = base64.b64decode(screenshot_map[jid])
+                            st.image(img_bytes, caption="Application preview",
+                                     use_container_width=True)
+                        st.markdown("**Review the form, then click Submit or Skip.**")
+                        b1, b2 = st.columns(2)
+                        if b1.button("✅ Submit Application", key=f"sub_{jid}", type="primary"):
+                            applier.signal_submit(approve=True)
+                            st.success("Submitted!")
+                        if b2.button("⏭ Skip", key=f"skip_{jid}"):
+                            applier.signal_submit(approve=False)
+
+                if st.session_state.apply_results:
+                    st.divider()
+                    st.markdown("#### Results")
+                    for r in st.session_state.apply_results:
+                        icon = {"done":"✅","failed":"❌","skipped":"⏭"}.get(r.get("status",""),"•")
+                        st.markdown(f"{icon} **{r.get('title')} @ {r.get('company')}** — "
+                                    f"{r.get('status','').upper()}"
+                                    + (f" _{r.get('error','')}_" if r.get("error") else ""))
+
+                if st.session_state.apply_thread_running:
+                    st.info("Applying… refresh to see updates.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

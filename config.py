@@ -21,8 +21,16 @@ def active_model() -> str:
     return GEMINI_MODEL if AI_PROVIDER == "gemini" else ANTHROPIC_MODEL
 
 # LinkedIn
-LINKEDIN_EMAIL    = os.getenv("LINKEDIN_EMAIL",    "")
-LINKEDIN_PASSWORD = os.getenv("LINKEDIN_PASSWORD", "")
+# Profile URL is optional but recommended — it appears on generated resumes and
+# pre-fills the "LinkedIn URL" question on Easy Apply forms. Email + password
+# are ONLY required for the Auto Apply tab; the rest of the app works without.
+LINKEDIN_PROFILE_URL = os.getenv("LINKEDIN_PROFILE_URL", "")
+LINKEDIN_EMAIL       = os.getenv("LINKEDIN_EMAIL",       "")
+LINKEDIN_PASSWORD    = os.getenv("LINKEDIN_PASSWORD",    "")
+
+
+def auto_apply_available() -> bool:
+    return bool(LINKEDIN_EMAIL and LINKEDIN_PASSWORD)
 
 # Job search defaults
 DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "United States")
