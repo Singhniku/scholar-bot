@@ -43,7 +43,7 @@ class LinkedInScraper:
     BASE_URL = "https://www.linkedin.com/jobs/search/"
     JOB_URL = "https://www.linkedin.com/jobs/view/{job_id}/"
 
-    def __init__(self, delay_range: tuple[float, float] = (2.0, 5.0)):
+    def __init__(self, delay_range: tuple[float, float] = (0.8, 1.8)):
         self.session = requests.Session()
         self.session.headers.update(_HEADERS)
         self.delay_range = delay_range
@@ -52,8 +52,7 @@ class LinkedInScraper:
     def _init_session(self):
         """Warm up the session so LinkedIn sets cookies."""
         try:
-            self.session.get("https://www.linkedin.com", timeout=10)
-            self._sleep()
+            self.session.get("https://www.linkedin.com", timeout=8)
         except Exception as e:
             logger.warning(f"Could not warm up LinkedIn session: {e}")
 
@@ -82,6 +81,7 @@ class LinkedInScraper:
             query = " ".join(keywords[:8])
 
         # Compute seconds for any number of days (LinkedIn accepts r{seconds})
+        days = int(days)
         time_filter = _TIME_FILTER.get(days) or f"r{days * 86400}"
         jobs: list[dict[str, Any]] = []
         start = 0
@@ -114,8 +114,8 @@ class LinkedInScraper:
         unique = {j["job_id"]: j for j in jobs if j.get("job_id")}.values()
         result = list(unique)[:num_jobs]
 
-        logger.info(f"Fetching full descriptions for {min(len(result), 20)} jobs...")
-        for job in result[:20]:
+        logger.info(f"Fetching full descriptions for {min(len(result), 10)} jobs...")
+        for job in result[:10]:
             if not job.get("description"):
                 self._enrich_job(job)
                 self._sleep()
