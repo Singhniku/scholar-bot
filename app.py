@@ -615,134 +615,159 @@ with tab_jobs:
 
         st.divider()
 
-        for r in filtered:
-            job     = r["job"]
-            analysis= r["match_analysis"]
-            score   = r["match_score"]
-            fb      = r.get("is_fallback", False)
-            jid     = job.get("job_id","") or job.get("title","")
-            jurl    = job.get("url","")
+        for idx, r in enumerate(filtered):
+            job      = r["job"]
+            analysis = r["match_analysis"]
+            score    = r["match_score"]
+            fb       = r.get("is_fallback", False)
+            jid      = job.get("job_id","") or job.get("title","") or str(idx)
+            jurl     = job.get("url","")
 
-            # ── Job card header ───────────────────────────────────────────────
-            st.markdown(
-                f'<div class="job-card">'
-                f'<b style="font-size:1.05rem">{job.get("title","")}</b>&nbsp;'
-                f'{score_badge(score, fb)}<br>'
-                f'🏢 <b>{job.get("company","")}</b>&nbsp;&nbsp;'
-                f'📍 {job.get("location","")}&nbsp;&nbsp;'
-                f'📅 {fmt_date(job.get("posted_date"))}'
-                f'</div>',
-                unsafe_allow_html=True)
+            title    = job.get("title")   or "Unknown Position"
+            company  = job.get("company") or "Unknown Company"
+            location = job.get("location") or "Location N/A"
+            posted   = fmt_date(job.get("posted_date"))
 
-            # ── Action buttons ────────────────────────────────────────────────
-            ba, bb, bc = st.columns([2, 2, 1])
+            # ── Job card (native container — theme-safe) ──────────────────────
+            with st.container(border=True):
+                # Row 1: title + score badge
+                h_col, b_col = st.columns([5, 1])
+                with h_col:
+                    st.markdown(f"### {title}")
+                with b_col:
+                    st.markdown(score_badge(score, fb), unsafe_allow_html=True)
 
-            # Apply Now
-            if jurl:
-                ba.link_button("🔗 Apply Now on LinkedIn", jurl, use_container_width=True)
-            else:
-                ba.button("🔗 Apply Now", disabled=True, key=f"apply_dis_{jid}",
-                          use_container_width=True)
+                # Row 2: company | location | date
+                st.markdown(
+                    f"🏢 **{company}**&ensp;|&ensp;"
+                    f"📍 {location}&ensp;|&ensp;"
+                    f"📅 {posted}"
+                )
 
-            # Optimize for this job
-            opt_clicked = bb.button(
-                "✨ Optimize My Resume for This Job",
-                key=f"opt_{jid}",
-                use_container_width=True,
-                disabled=not has_ai,
-                help="Requires a Gemini or Anthropic API key" if not has_ai else "",
-            )
+                # ── Action buttons ────────────────────────────────────────────
+                ba, bb, bc = st.columns([2, 2, 1])
 
-            # Add to apply queue
-            in_queue = any(j.get("job_id") == jid for j in st.session_state.apply_queue)
-            if bc.button("➕ Queue" if not in_queue else "✅ Queued",
-                         key=f"q_{jid}", disabled=in_queue,
-                         use_container_width=True):
-                st.session_state.apply_queue.append(job)
-                st.rerun()
+                if jurl:
+                    ba.link_button("🔗 Apply Now on LinkedIn", jurl,
+                                   use_container_width=True)
+                else:
+                    ba.button("🔗 Apply Now", disabled=True,
+                              key=f"apply_dis_{jid}", use_container_width=True)
 
-            # ── Per-job optimisation ──────────────────────────────────────────
-            if opt_clicked:
-                with st.spinner(f"Optimising resume for {job.get('title')} @ {job.get('company')}…"):
-                    try:
-                        opt  = _get_optimizer(ai_provider, google_key, anthropic_key)
-                        result = opt.optimize_resume(rd, r["job_requirements"],
-                                                      r["match_analysis"])
-                        st.session_state.per_job_opt[jid] = result
-                        st.success("Optimised! Download below.")
-                    except Exception as e:
-                        st.error(f"Optimisation failed: {e}")
+                opt_clicked = bb.button(
+                    "✨ Optimize My Resume for This Job",
+                    key=f"opt_{jid}",
+                    use_container_width=True,
+                    disabled=not has_ai,
+                    help="Requires a Gemini or Anthropic API key" if not has_ai else "",
+                )
 
-            # ── Show optimised resume if ready ────────────────────────────────
-            if jid in st.session_state.per_job_opt:
-                opt_res = st.session_state.per_job_opt[jid]
-                with st.expander("📄 Optimised Resume — Preview & Download", expanded=True):
-                    dc, dd = st.columns(2)
+                in_queue = any(j.get("job_id") == jid
+                               for j in st.session_state.apply_queue)
+                if bc.button("➕ Queue" if not in_queue else "✅ Queued",
+                             key=f"q_{jid}", disabled=in_queue,
+                             use_container_width=True):
+                    st.session_state.apply_queue.append(job)
+                    st.rerun()
 
-                    # PDF download
-                    with dc:
+                # ── Expandable sections ───────────────────────────────────────
+                desc_text = job.get("description", "").strip()
+                with st.expander("📋 Job Description"):
+                    if desc_text:
+                        st.text(desc_text[:3000] + ("…" if len(desc_text) > 3000 else ""))
+                    else:
+                        st.info("Full description not fetched — click Apply to view on LinkedIn.")
+
+                with st.expander("🔍 Skills Gap"):
+                    ca, cb = st.columns(2)
+                    with ca:
+                        st.markdown("**Matching skills**")
+                        matched = analysis.get("matched_required", [])
+                        if matched:
+                            st.markdown(
+                                " ".join(
+                                    f'<span class="badge badge-green">{s}</span>'
+                                    for s in matched),
+                                unsafe_allow_html=True)
+                        else:
+                            st.caption("None detected")
+                    with cb:
+                        st.markdown("**Missing skills**")
+                        missing = analysis.get("missing_required", [])
+                        if missing:
+                            st.markdown(
+                                " ".join(
+                                    f'<span class="badge badge-red">{s}</span>'
+                                    for s in missing),
+                                unsafe_allow_html=True)
+                        else:
+                            st.caption("None — great match!")
+
+                # ── Per-job optimisation ──────────────────────────────────────
+                if opt_clicked:
+                    with st.spinner(
+                        f"Optimising resume for {title} @ {company}…"
+                    ):
                         try:
+                            opt = _get_optimizer(ai_provider, google_key, anthropic_key)
+                            result = opt.optimize_resume(
+                                rd, r["job_requirements"], r["match_analysis"])
+                            st.session_state.per_job_opt[jid] = result
+                            st.success("Optimised! Expand the section below to download.")
+                        except Exception as e:
+                            st.error(f"Optimisation failed: {e}")
+
+                if jid in st.session_state.per_job_opt:
+                    opt_res = st.session_state.per_job_opt[jid]
+                    with st.expander("📄 Optimised Resume — Preview & Download",
+                                     expanded=True):
+                        dc, dd = st.columns(2)
+                        with dc:
+                            try:
+                                from src.resume_generator import ResumeGenerator
+                                gen = ResumeGenerator()
+                                with tempfile.NamedTemporaryFile(
+                                    delete=False, suffix=".pdf"
+                                ) as tp:
+                                    gen.generate_pdf(opt_res, tp.name)
+                                    pdf_bytes = Path(tp.name).read_bytes()
+                                    import os as _os; _os.unlink(tp.name)
+                                st.download_button(
+                                    "⬇ Download PDF", pdf_bytes,
+                                    f"resume_{company.replace(' ','_')[:12]}.pdf",
+                                    "application/pdf", key=f"dlpdf_{jid}",
+                                    use_container_width=True, type="primary")
+                            except Exception as e:
+                                st.error(f"PDF error: {e}")
+                        with dd:
                             from src.resume_generator import ResumeGenerator
                             gen = ResumeGenerator()
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tp:
-                                gen.generate_pdf(opt_res, tp.name)
-                                pdf_bytes = Path(tp.name).read_bytes()
-                                import os as _os; _os.unlink(tp.name)
+                            with tempfile.NamedTemporaryFile(
+                                delete=False, suffix=".md", mode="w"
+                            ) as tm:
+                                gen.generate_markdown(opt_res, tm.name)
+                                md_text = Path(tm.name).read_text()
+                                import os as _os; _os.unlink(tm.name)
                             st.download_button(
-                                "⬇ Download PDF",
-                                pdf_bytes,
-                                f"resume_{job.get('company','').replace(' ','_')[:12]}.pdf",
-                                "application/pdf", key=f"dlpdf_{jid}",
-                                use_container_width=True, type="primary")
-                        except Exception as e:
-                            st.error(f"PDF error: {e}")
+                                "⬇ Download Markdown", md_text,
+                                f"resume_{company.replace(' ','_')[:12]}.md",
+                                "text/markdown", key=f"dlmd_{jid}",
+                                use_container_width=True)
 
-                    # Markdown download
-                    with dd:
-                        from src.resume_generator import ResumeGenerator
-                        gen = ResumeGenerator()
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w") as tm:
-                            gen.generate_markdown(opt_res, tm.name)
-                            md_text = Path(tm.name).read_text()
-                            import os as _os; _os.unlink(tm.name)
-                        st.download_button(
-                            "⬇ Download Markdown", md_text,
-                            f"resume_{job.get('company','').replace(' ','_')[:12]}.md",
-                            "text/markdown", key=f"dlmd_{jid}",
-                            use_container_width=True)
-
-                    # Changes made
-                    if opt_res.get("optimization_notes"):
-                        st.markdown("**Changes made:**")
-                        for n in opt_res["optimization_notes"][:6]:
-                            st.markdown(f"✓ {n}")
-                    if opt_res.get("added_keywords"):
-                        st.markdown(
-                            "**Keywords added:** "
-                            + " ".join(f'<span class="badge badge-green">{k}</span>'
-                                       for k in opt_res["added_keywords"][:10]),
-                            unsafe_allow_html=True)
-
-                    # Apply link again, prominently
-                    if jurl:
-                        st.link_button("🚀 Apply Now with This Resume →", jurl,
-                                       use_container_width=True)
-
-            # ── Skills gap ────────────────────────────────────────────────────
-            with st.expander("Skills gap"):
-                ca,cb = st.columns(2)
-                with ca:
-                    st.markdown("**Matching**")
-                    st.markdown(
-                        " ".join(f'<span class="badge badge-green">{s}</span>'
-                                 for s in analysis.get("matched_required",[])) or "—",
-                        unsafe_allow_html=True)
-                with cb:
-                    st.markdown("**Missing**")
-                    st.markdown(
-                        " ".join(f'<span class="badge badge-red">{s}</span>'
-                                 for s in analysis.get("missing_required",[])) or "—",
-                        unsafe_allow_html=True)
+                        if opt_res.get("optimization_notes"):
+                            st.markdown("**Changes made:**")
+                            for n in opt_res["optimization_notes"][:6]:
+                                st.markdown(f"✓ {n}")
+                        if opt_res.get("added_keywords"):
+                            st.markdown(
+                                "**Keywords added:** "
+                                + " ".join(
+                                    f'<span class="badge badge-green">{k}</span>'
+                                    for k in opt_res["added_keywords"][:10]),
+                                unsafe_allow_html=True)
+                        if jurl:
+                            st.link_button("🚀 Apply Now with This Resume →",
+                                           jurl, use_container_width=True)
 
         # ── Bulk add to queue ─────────────────────────────────────────────────
         if filtered:
