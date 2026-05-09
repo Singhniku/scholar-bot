@@ -197,8 +197,15 @@ def _normalize_resume(rd: Any) -> dict:
         return str(v)
 
     def _as_int(v):
-        try:    return int(v) if v not in (None, "") else 0
-        except (TypeError, ValueError): return 0
+        if v in (None, ""): return 0
+        if isinstance(v, bool): return int(v)
+        if isinstance(v, (int, float)):
+            try: return int(v)
+            except (TypeError, ValueError): return 0
+        # Strings: extract leading digits — "5+", "5 years", "5.5 yrs" → 5
+        import re as _re
+        m = _re.search(r"\d+", str(v))
+        return int(m.group(0)) if m else 0
 
     norm: dict = {}
     for k in ("name","email","phone","location","linkedin","summary","current_title"):
@@ -217,6 +224,7 @@ def _normalize_resume(rd: Any) -> dict:
                 "title":         _as_str(e.get("title","")),
                 "company":       _as_str(e.get("company","")),
                 "duration":      _as_str(e.get("duration","")),
+                "tenure":        _as_str(e.get("tenure","")),
                 "location":      _as_str(e.get("location","")),
                 "achievements":  [_as_str(a) for a in _as_list(e.get("achievements",[]))],
             })
@@ -450,7 +458,7 @@ def _get_optimizer(provider: str, google_key: str, anthropic_key: str):
 # ── Session state ─────────────────────────────────────────────────────────────
 for k, v in {
     "resume_text": None, "resume_data": None, "ai_used": False,
-    "jobs": None, "ranked_jobs": None, "top_optimized": None,
+    "jobs": None, "ranked_jobs": None, "ranked_jobs_all": None, "top_optimized": None,
     "opt_pdf_paths": {}, "per_job_opt": {},
     "apply_queue": [], "apply_results": [], "apply_status_map": {},
     "apply_screenshot_map": {}, "apply_thread_running": False, "applier": None,
@@ -495,8 +503,10 @@ with st.sidebar:
                                        "Leave blank to search by resume skills only.")
     location     = st.text_input("Location", value=os.getenv("DEFAULT_LOCATION","United States"))
     num_jobs     = st.slider("Max Jobs to Fetch", 10, 100, 50, 10)
-    min_match_pct= st.slider("Min Skill Match %", 10, 90, 50, 5,
-                              help="Only show jobs where ≥ this % of required skills match your resume")
+    min_match_pct= st.slider("Min Skill Match %", 0, 90, 25, 5,
+                              help="Only show jobs where ≥ this % of required skills match your resume. "
+                                   "In keyword (no-AI) mode scores rarely exceed 50% — "
+                                   "use 20-30% for realistic results.")
     days_filter  = st.number_input(
                         "Posted Within (days)", min_value=1, max_value=365,
                         value=30, step=1,
@@ -727,13 +737,29 @@ with tab_upload:
 
                     # ── Apply minimum skill-match filter ──────────────────────
                     before_filter = len(ranked)
-                    ranked = [r for r in ranked if r["match_score"] >= min_match_pct]
+                    above = [r for r in ranked if r["match_score"] >= min_match_pct]
+                    filtered_out = before_filter - len(above)
 
-                    st.session_state.ranked_jobs = ranked
-                    filtered_out = before_filter - len(ranked)
-                    label = (f"Showing {len(ranked)} jobs ≥{min_match_pct}% match"
-                             + (f" ({filtered_out} below threshold hidden)" if filtered_out else ""))
-                    s.update(label=label, state="complete")
+                    # Save BOTH lists so the UI can offer a "show all" toggle
+                    st.session_state.ranked_jobs_all = ranked
+                    st.session_state.ranked_jobs     = above
+
+                    if not above and ranked:
+                        # All jobs filtered out — keep the full list visible so
+                        # the user can see what came back and lower the slider.
+                        best = max(r["match_score"] for r in ranked)
+                        st.session_state.ranked_jobs = ranked
+                        s.update(
+                            label=(f"Found {before_filter} jobs but ALL are below "
+                                    f"your {min_match_pct}% threshold (best match: "
+                                    f"{best:.0f}%). Showing them anyway — lower the "
+                                    f"slider in the sidebar to filter."),
+                            state="complete")
+                    else:
+                        label = (f"Showing {len(above)} jobs ≥{min_match_pct}% match"
+                                 + (f"  ·  {filtered_out} below threshold hidden"
+                                    if filtered_out else ""))
+                        s.update(label=label, state="complete")
 
                 # ── Step 5: Bulk optimise top N (AI only) ────────────────────
                 if has_ai and st.session_state.ai_used:
@@ -800,32 +826,46 @@ with tab_upload:
             st.info(rd["summary"][:400])
 
         if rd.get("experience"):
-            with st.expander(f"💼 Work Experience ({len(rd['experience'])} roles)",
-                             expanded=True):
+            num_roles = len(rd["experience"])
+            with st.expander(
+                f"💼 Work Experience  ·  {num_roles} role"
+                f"{'s' if num_roles != 1 else ''}  ·  "
+                f"{rd.get('experience_years', 0)} yrs total",
+                expanded=True,
+            ):
                 for exp in rd["experience"]:
                     title    = exp.get("title", "")
                     company  = exp.get("company", "")
                     duration = exp.get("duration", "")
+                    tenure   = exp.get("tenure", "")
                     location = exp.get("location", "")
                     head_bits = " — ".join(b for b in [title, company] if b)
-                    sub_bits  = " | ".join(b for b in [duration, location] if b)
+                    sub_parts = []
+                    if duration: sub_parts.append(duration)
+                    if tenure:   sub_parts.append(f"⏱ {tenure}")
+                    if location: sub_parts.append(f"📍 {location}")
                     if head_bits:
                         st.markdown(f"**{head_bits}**")
-                    if sub_bits:
-                        st.caption(sub_bits)
+                    if sub_parts:
+                        st.caption(" · ".join(sub_parts))
                     for ach in exp.get("achievements", []):
                         st.markdown(f"&nbsp;&nbsp;• {ach}")
                     st.markdown("")
 
         if rd.get("education"):
-            with st.expander(f"🎓 Education ({len(rd['education'])} entries)",
-                             expanded=False):
+            with st.expander(
+                f"🎓 Education  ·  {len(rd['education'])} entries",
+                expanded=False,
+            ):
                 for edu in rd["education"]:
-                    bits = " · ".join(b for b in [
-                        edu.get("degree",""), edu.get("institution",""),
-                        edu.get("year",""), edu.get("gpa",""),
+                    head = edu.get("institution", "")
+                    sub  = " · ".join(b for b in [
+                        edu.get("degree",""), edu.get("year",""), edu.get("gpa",""),
                     ] if b)
-                    st.markdown(f"• {bits}")
+                    if head:
+                        st.markdown(f"**{head}**")
+                    if sub:
+                        st.caption(sub)
 
         # ── ATS Score panel ───────────────────────────────────────────────────
         if ats:

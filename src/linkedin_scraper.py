@@ -74,9 +74,15 @@ class LinkedInScraper:
         LinkedIn returns title-matched results rather than generic skill matches.
         Returns a list of job dicts sorted by posting date descending.
         """
+        # Build query.
+        # LinkedIn's keywords field treats each token as AND-required, so
+        # mixing a multi-word title with skill keywords yields zero results
+        # (e.g. "Software Engineer python aws docker" ⇒ jobs needing ALL of
+        # those exact tokens). Wrap the title in quotes for phrase match and
+        # SKIP skill keywords when a title is supplied — skills are used
+        # downstream for scoring, not for the LinkedIn query.
         if job_title:
-            skill_terms = [k for k in keywords if k.lower() != job_title.lower()]
-            query = " ".join([job_title] + skill_terms[:5])
+            query = f'"{job_title.strip()}"'
         else:
             query = " ".join(keywords[:8])
 

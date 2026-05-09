@@ -105,9 +105,12 @@ def _extract_location(preamble: str) -> str:
 
 
 def _calc_years_experience(exp_section: str) -> int:
+    """
+    Total years of experience as the union of all date ranges in the
+    experience section — overlapping spans count once, not twice.
+    """
     if not exp_section:
         return 0
-    total_months = 0
     now = datetime.now()
     month_idx = {m: i for i, m in enumerate(
         ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"], start=1)}
@@ -125,11 +128,56 @@ def _calc_years_experience(exp_section: str) -> int:
             return datetime(int(m.group(1)), 1, 1)
         return None
 
+    ranges: list[tuple[datetime, datetime]] = []
     for m in _DATE_RANGE_RE.finditer(exp_section):
         start, end = parse_date(m.group(1)), parse_date(m.group(2))
         if start and end and end > start:
-            total_months += (end.year - start.year) * 12 + (end.month - start.month)
+            ranges.append((start, end))
+    if not ranges:
+        return 0
+
+    # Merge overlapping ranges, then sum
+    ranges.sort()
+    merged = [ranges[0]]
+    for s, e in ranges[1:]:
+        last_s, last_e = merged[-1]
+        if s <= last_e:
+            merged[-1] = (last_s, max(last_e, e))
+        else:
+            merged.append((s, e))
+
+    total_months = sum((e.year - s.year) * 12 + (e.month - s.month)
+                        for s, e in merged)
     return max(0, round(total_months / 12))
+
+
+def _tenure_text(start_str: str, end_str: str) -> str:
+    """Convert a date-range string pair to 'Xy Ym' or 'Ym' tenure label."""
+    now = datetime.now()
+    month_idx = {m: i for i, m in enumerate(
+        ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"], start=1)}
+
+    def parse(s):
+        s = s.strip().lower()
+        if s in ("present", "current"):
+            return now
+        m = re.match(rf"({_MONTH})\s+(\d{{4}})", s, re.I)
+        if m:
+            return datetime(int(m.group(2)),
+                            month_idx.get(m.group(1).lower()[:3], 1), 1)
+        m = re.match(r"(\d{4})", s)
+        if m:
+            return datetime(int(m.group(1)), 1, 1)
+        return None
+
+    start, end = parse(start_str), parse(end_str)
+    if not (start and end and end > start):
+        return ""
+    months = (end.year - start.year) * 12 + (end.month - start.month)
+    y, m = divmod(months, 12)
+    if y and m: return f"{y}y {m}m"
+    if y:       return f"{y}y"
+    return f"{m}m"
 
 
 def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
@@ -154,6 +202,7 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
                 "title":    "",
                 "company":  company,
                 "duration": date_m.group(0),
+                "tenure":   _tenure_text(date_m.group(1), date_m.group(2)),
                 "achievements": [],
                 "location": "",
             }
@@ -167,7 +216,6 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
 
     if current:
         entries.append(current)
-    # Keep only entries that have at least a company or a title
     return [e for e in entries if e.get("company") or e.get("title")]
 
 
@@ -288,6 +336,17 @@ def _build_summary(rd: dict) -> str:
     return " ".join(parts).strip()
 
 
+def _kw_in_text(kw: str, lower_text: str) -> bool:
+    """Word-boundary match so 'r' doesn't match inside 'random' and 'go'
+    doesn't match inside 'going'. Multi-word keywords use plain substring."""
+    if " " in kw:
+        return kw in lower_text
+    # Build a regex that allows tech-character neighbours (#, +, /) but not
+    # alphanumerics, so c++ and ci/cd still match.
+    pattern = rf"(?<![a-z0-9]){re.escape(kw)}(?![a-z0-9])"
+    return re.search(pattern, lower_text) is not None
+
+
 # ── Main extractors ──────────────────────────────────────────────────────────
 def extract_resume(text: str) -> dict[str, Any]:
     """Extract structured resume data using regex/heuristics — no AI."""
@@ -323,7 +382,7 @@ def extract_resume(text: str) -> dict[str, Any]:
 
     # Skills (categorised + keyword scan)
     cat_skills = _parse_skills(skl_text)
-    found_kw   = sorted(w for w in _TECH if w in lower)
+    found_kw   = sorted(w for w in _TECH if _kw_in_text(w, lower))
 
     tech       = _dedupe_ci(cat_skills["technical"] + cat_skills["languages"]
                             + [s for s in found_kw
@@ -388,7 +447,7 @@ def extract_job(description: str, title: str = "") -> dict[str, Any]:
             "_fallback": True,
         }
     lower    = description.lower()
-    required = sorted(w for w in _TECH if w in lower)
+    required = sorted(w for w in _TECH if _kw_in_text(w, lower))
     exp_match= _EXP_RE.search(description)
     exp_req  = int(exp_match.group(1)) if exp_match else 0
 
