@@ -524,13 +524,27 @@ with st.sidebar:
                                        "Leave blank to search by resume skills only.")
     location     = st.text_input("Location", value=os.getenv("DEFAULT_LOCATION","United States"))
     num_jobs     = st.slider("Max Jobs to Fetch", 10, 100, 50, 10)
-    job_sources  = st.multiselect(
+    _SOURCE_OPTIONS = [
+        "LinkedIn",                          # works
+        "Instahyre",                          # works (API)
+        "Indeed (Cloudflare-blocked)",        # 403 always
+        "Glassdoor (Cloudflare-blocked)",     # 403 always
+    ]
+    _picked = st.multiselect(
         "Job Portals",
-        options=["LinkedIn", "Indeed", "Glassdoor", "Instahyre"],
-        default=["LinkedIn"],
-        help="Search across multiple portals. Each result is tagged with "
-             "its source. Aggregated and ranked by skill match."
+        options=_SOURCE_OPTIONS,
+        default=["LinkedIn", "Instahyre"],
+        help="LinkedIn + Instahyre return real results. "
+             "Indeed and Glassdoor put their search behind Cloudflare's "
+             "JS challenge — direct HTTP requests get 403. "
+             "They're listed for transparency; selecting them adds "
+             "near-zero results.",
     )
+    # Strip the parenthetical disclaimer for downstream code
+    job_sources = [s.split(" (")[0] for s in _picked]
+    if any("Cloudflare" in s for s in _picked):
+        st.caption("⚠ Indeed / Glassdoor will return 0 — Cloudflare blocks scraping. "
+                   "Use LinkedIn + Instahyre for real results.")
     min_match_pct= st.slider("Min Skill Match %", 0, 90, 25, 5,
                               help="Only show jobs where ≥ this % of required skills match your resume. "
                                    "In keyword (no-AI) mode scores rarely exceed 50% — "
@@ -737,8 +751,16 @@ with tab_upload:
                              state="complete")
 
                 if not jobs:
-                    st.warning("LinkedIn returned no results — may be rate-limiting. "
-                               "Try again in a few minutes.")
+                    sources_str = ", ".join(job_sources or ["LinkedIn"])
+                    st.warning(
+                        f"No jobs returned from any selected portal "
+                        f"({sources_str}). Common causes:\n\n"
+                        f"• **Indeed / Glassdoor** block direct scraping with "
+                        f"Cloudflare — they return 403. Try LinkedIn + Instahyre.\n"
+                        f"• **Rate limiting** — wait a few minutes and retry.\n"
+                        f"• **Title too narrow** — broaden the Job Title.\n"
+                        f"• **Location** — try a wider region (e.g. 'United States')."
+                    )
                     st.stop()
 
                 # ── Step 4: Score ────────────────────────────────────────────
