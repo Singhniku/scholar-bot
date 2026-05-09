@@ -110,6 +110,7 @@ class ResumeGenerator:
                 resume_data.get("email", ""),
                 resume_data.get("phone", ""),
                 resume_data.get("location", ""),
+                resume_data.get("linkedin_url", ""),
             ] if p
         ]
         story.append(Paragraph(" | ".join(contact_parts), contact_style))
@@ -213,6 +214,7 @@ class ResumeGenerator:
                 resume_data.get("email", ""),
                 resume_data.get("phone", ""),
                 resume_data.get("location", ""),
+                resume_data.get("linkedin_url", ""),
             ] if p
         )
         lines.append(contact)

@@ -54,7 +54,7 @@ class SkillsExtractor:
 Resume text:
 {resume_text}"""
 
-        text = self.client.generate(_SYSTEM, prompt, max_tokens=4096)
+        text = self.client.generate(_SYSTEM, prompt, max_tokens=8192)
         return _parse_json(text)
 
     # ── Job description extraction ────────────────────────────────────────────
@@ -76,7 +76,7 @@ Job Title: {job_title}
 Job Description:
 {job_description}"""
 
-        text = self.client.generate(_SYSTEM, prompt, max_tokens=2048)
+        text = self.client.generate(_SYSTEM, prompt, max_tokens=4096)
         return _parse_json(text)
 
     # ── Match scoring (pure Python — no AI call needed) ───────────────────────

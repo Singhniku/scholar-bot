@@ -99,6 +99,12 @@ def main():
     extractor = SkillsExtractor(client=ai)
     resume_data = extractor.extract_from_resume(resume_text)
 
+    # LinkedIn profile URL is optional; when present it lands on the generated
+    # resume contact line and on the "LinkedIn URL" field of Easy Apply forms.
+    linkedin_profile_url = os.getenv("LINKEDIN_PROFILE_URL", "").strip()
+    if linkedin_profile_url:
+        resume_data["linkedin_url"] = linkedin_profile_url
+
     skills = (
         resume_data.get("technical_skills", [])
         + resume_data.get("tools", [])
@@ -180,6 +186,12 @@ def main():
     top_optimized = optimizer.bulk_optimize(
         resume_data, ranked_jobs, top_n=args.optimize_top
     )
+
+    # Re-attach linkedin_url — ATSOptimizer returns a fresh JSON that doesn't
+    # include fields outside its declared schema.
+    if linkedin_profile_url:
+        for item in top_optimized:
+            item["optimized_resume"]["linkedin_url"] = linkedin_profile_url
 
     for i, item in enumerate(top_optimized, 1):
         job = item["job"]
