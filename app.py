@@ -524,6 +524,13 @@ with st.sidebar:
                                        "Leave blank to search by resume skills only.")
     location     = st.text_input("Location", value=os.getenv("DEFAULT_LOCATION","United States"))
     num_jobs     = st.slider("Max Jobs to Fetch", 10, 100, 50, 10)
+    job_sources  = st.multiselect(
+        "Job Portals",
+        options=["LinkedIn", "Indeed", "Glassdoor", "Instahyre"],
+        default=["LinkedIn"],
+        help="Search across multiple portals. Each result is tagged with "
+             "its source. Aggregated and ranked by skill match."
+    )
     min_match_pct= st.slider("Min Skill Match %", 0, 90, 25, 5,
                               help="Only show jobs where ≥ this % of required skills match your resume. "
                                    "In keyword (no-AI) mode scores rarely exceed 50% — "
@@ -706,17 +713,28 @@ with tab_upload:
                     )
                     st.stop()
 
+                src_label = (" + ".join(job_sources) if job_sources
+                              else "LinkedIn")
                 with st.status(
-                    f"Searching LinkedIn for {search_label} in {location}…",
+                    f"Searching {src_label} for {search_label} in {location}…",
                     expanded=True
                 ) as s:
-                    from src.linkedin_scraper import LinkedInScraper
-                    jobs = LinkedInScraper().search_jobs(
-                        keywords=search_keywords, location=location,
-                        num_jobs=num_jobs, days=days_filter,
-                        job_title=job_title.strip() if job_title.strip() else None)
+                    from src.pipeline import fetch_jobs as _fetch_jobs
+                    jobs = _fetch_jobs(
+                        job_title=job_title.strip() or " ".join(search_keywords),
+                        location=location,
+                        num_jobs=num_jobs,
+                        days=int(days_filter),
+                        fallback_keywords=search_keywords,
+                        sources=job_sources or ["LinkedIn"],
+                    )
                     st.session_state.jobs = jobs
-                    s.update(label=f"Found {len(jobs)} job listings", state="complete")
+                    by_src = {}
+                    for j in jobs:
+                        by_src[j.get("source","?")] = by_src.get(j.get("source","?"), 0) + 1
+                    breakdown = "  ·  ".join(f"{src}: {n}" for src, n in by_src.items())
+                    s.update(label=f"Found {len(jobs)} jobs  ·  {breakdown}",
+                             state="complete")
 
                 if not jobs:
                     st.warning("LinkedIn returned no results — may be rate-limiting. "
@@ -990,14 +1008,20 @@ with tab_jobs:
         ranked = st.session_state.ranked_jobs
         rd     = st.session_state.resume_data or {}
 
-        c1,c2,c3 = st.columns([1,1,2])
+        # Available sources in the current result set (for the filter)
+        srcs_in_results = sorted({(r["job"].get("source") or "LinkedIn")
+                                   for r in ranked})
+        c1,c2,c3,c4 = st.columns([1,1,1.4,2])
         min_score = c1.slider("Min Match %", 0, 100, 0, key="minscore")
         show_n    = c2.selectbox("Show", [10,25,50,100], index=1, key="shown")
-        search_q  = c3.text_input("Filter title / company", "", key="srch")
+        src_filter= c3.multiselect("Source", srcs_in_results,
+                                     default=srcs_in_results, key="src_f")
+        search_q  = c4.text_input("Filter title / company", "", key="srch")
 
         filtered = [
             r for r in ranked
             if r["match_score"] >= min_score
+            and (r["job"].get("source") or "LinkedIn") in src_filter
             and (not search_q
                  or search_q.lower() in r["job"].get("title","").lower()
                  or search_q.lower() in r["job"].get("company","").lower())
@@ -1030,13 +1054,30 @@ with tab_jobs:
             company  = job.get("company") or "Unknown Company"
             location = job.get("location") or "Location N/A"
             posted   = fmt_date(job.get("posted_date"))
+            source   = job.get("source")   or "LinkedIn"
+
+            # Source badge colours (LinkedIn blue, Indeed dark blue, Glassdoor green, Instahyre orange)
+            _SRC_COLOURS = {
+                "LinkedIn":  ("#0a66c2", "#fff"),
+                "Indeed":    ("#003a9b", "#fff"),
+                "Glassdoor": ("#0caa41", "#fff"),
+                "Instahyre": ("#ed5a2d", "#fff"),
+            }
+            sbg, sfg = _SRC_COLOURS.get(source, ("#6c757d", "#fff"))
+            source_badge = (
+                f'<span style="display:inline-block;padding:2px 10px;'
+                f'border-radius:14px;font-size:.7rem;font-weight:700;'
+                f'background:{sbg};color:{sfg};margin-left:6px">'
+                f'{source}</span>'
+            )
 
             # ── Job card (native container — theme-safe) ──────────────────────
             with st.container(border=True):
-                # Row 1: title + score badge
+                # Row 1: title + source + score badge
                 h_col, b_col = st.columns([5, 1])
                 with h_col:
-                    st.markdown(f"### {title}")
+                    st.markdown(f"### {title} {source_badge}",
+                                unsafe_allow_html=True)
                 with b_col:
                     st.markdown(score_badge(score, fb), unsafe_allow_html=True)
 

@@ -395,7 +395,70 @@ case("pipeline_summary_fields")(
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 11. SUMMARY
+# 11. MULTI-PORTAL SCRAPERS
+# ════════════════════════════════════════════════════════════════════════════
+header("11 · Multi-portal scrapers")
+
+# Module imports
+from src.scrapers import (IndeedScraper, GlassdoorScraper,
+                          InstahyreScraper, MultiPortalScraper, scrape_all)
+from src.scrapers.multi import _dedupe, ALL_SOURCES
+
+case("scrapers_module_loads")(True, "imports succeed")
+case("scrapers_4_sources")(set(ALL_SOURCES) ==
+                            {"LinkedIn","Indeed","Glassdoor","Instahyre"})
+
+# SOURCE attribute on each scraper class
+case("indeed_source_tag")(IndeedScraper().SOURCE == "Indeed")
+case("glassdoor_source_tag")(GlassdoorScraper().SOURCE == "Glassdoor")
+case("instahyre_source_tag")(InstahyreScraper().SOURCE == "Instahyre")
+
+# Empty input handling
+case("indeed_empty_title_returns_empty")(
+    IndeedScraper().search_jobs(job_title="") == [])
+case("glassdoor_empty_title_returns_empty")(
+    GlassdoorScraper().search_jobs(job_title="") == [])
+case("instahyre_empty_title_returns_empty")(
+    InstahyreScraper().search_jobs(job_title="") == [])
+
+# Dedupe across portals
+fake_multi = [
+    {"title":"Software Engineer","company":"Microsoft","source":"LinkedIn","url":"l1"},
+    {"title":"Software Engineer","company":"Microsoft","source":"Indeed","url":"i1"},
+    {"title":"Software Engineer","company":"Microsoft","source":"Glassdoor","url":"g1"},
+    {"title":"Senior SWE","company":"Apple","source":"Indeed","url":"i2"},
+]
+deduped = _dedupe(fake_multi)
+case("multi_dedupes_cross_portal")(len(deduped) == 2,
+                                    f"{len(deduped)} (expected 2)")
+case("multi_first_kept_for_collisions")(
+    deduped[0].get("source") == "LinkedIn",
+    f"got {deduped[0].get('source')}"
+)
+
+# MultiPortalScraper accepts source list
+m = MultiPortalScraper(sources=["Indeed", "Glassdoor"])
+case("multi_respects_source_list")(set(m.sources) == {"Indeed","Glassdoor"})
+
+# Live: scrape_all with one source (Indeed) — gracefully empty if blocked
+try:
+    live = scrape_all(job_title="Software Engineer",
+                      location="United States", num_jobs_per_source=3,
+                      sources=["Indeed"])
+    case("scrape_all_indeed_returns_list")(isinstance(live, list),
+                                            f"{len(live)} jobs")
+    if live:
+        case("scrape_all_tags_source")(
+            all(j.get("source") == "Indeed" for j in live),
+            f"all {len(live)} tagged"
+        )
+except Exception as e:
+    warn(f"Live multi-scrape skipped: {e}")
+    results["scrape_all_indeed_returns_list"] = "SKIP"
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 12. SUMMARY
 # ════════════════════════════════════════════════════════════════════════════
 header("Summary")
 

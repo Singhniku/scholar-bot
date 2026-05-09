@@ -103,7 +103,7 @@ def extract_resume_skills(
     return extract_resume(text)
 
 
-# ── Step 3: Fetch jobs from LinkedIn ─────────────────────────────────────
+# ── Step 3: Fetch jobs from one or more portals ──────────────────────────
 def fetch_jobs(
     *,
     job_title: str,
@@ -111,21 +111,35 @@ def fetch_jobs(
     num_jobs: int = 30,
     days: int = 30,
     fallback_keywords: Optional[list[str]] = None,
+    sources: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
     """
-    Search LinkedIn. When job_title is set, it is the primary query (in
-    quotes for phrase match). Skill keywords are used only as a fallback
-    when no title is provided.
+    Search the configured job portals. Defaults to LinkedIn only for
+    backwards compatibility; pass `sources=["LinkedIn", "Indeed",
+    "Glassdoor", "Instahyre"]` to fan out across all four.
+
+    When job_title is set, it is the primary query (in quotes for phrase
+    match on LinkedIn). Skill keywords are used only as a fallback when
+    no title is provided.
     """
+    if sources and len(sources) > 1:
+        from .scrapers.multi import scrape_all
+        return scrape_all(
+            job_title=job_title, location=location,
+            num_jobs_per_source=max(8, num_jobs // max(len(sources), 1)),
+            days=days, sources=sources,
+        )
+
+    # Single-source path (LinkedIn default)
     from .linkedin_scraper import LinkedInScraper
     keywords = [job_title] if job_title else (fallback_keywords or [])
-    return LinkedInScraper().search_jobs(
-        keywords=keywords,
-        location=location,
-        num_jobs=num_jobs,
-        days=days,
-        job_title=job_title or None,
+    jobs = LinkedInScraper().search_jobs(
+        keywords=keywords, location=location, num_jobs=num_jobs,
+        days=days, job_title=job_title or None,
     )
+    for j in jobs:
+        j.setdefault("source", "LinkedIn")
+    return jobs
 
 
 # ── Step 4: Score every job's skills against the resume ─────────────────
