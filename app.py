@@ -216,19 +216,40 @@ def _normalize_resume(rd: Any) -> dict:
               "certifications","all_keywords","optimization_notes","added_keywords"):
         norm[k] = [_as_str(x) for x in _as_list(rd.get(k, []))]
 
-    # Experience: list of dicts
+    # Experience: list of dicts. We always RECOMPUTE tenure and the total
+    # experience_years from the duration strings, because AI extractors
+    # frequently miscalculate or return placeholder values like 3 / "3+".
+    from src.fallback_extractor import _tenure_text, _DATE_RANGE_RE, _calc_years_experience
+
     exp_norm: list[dict] = []
+    duration_strings: list[str] = []
     for e in _as_list(rd.get("experience", [])):
         if isinstance(e, dict):
+            duration = _as_str(e.get("duration",""))
+            tenure   = _as_str(e.get("tenure",""))
+            # Recompute tenure from the duration if missing
+            if duration and not tenure:
+                m = _DATE_RANGE_RE.search(duration)
+                if m:
+                    tenure = _tenure_text(m.group(1), m.group(2))
+            duration_strings.append(duration)
             exp_norm.append({
                 "title":         _as_str(e.get("title","")),
                 "company":       _as_str(e.get("company","")),
-                "duration":      _as_str(e.get("duration","")),
-                "tenure":        _as_str(e.get("tenure","")),
+                "duration":      duration,
+                "tenure":        tenure,
                 "location":      _as_str(e.get("location","")),
                 "achievements":  [_as_str(a) for a in _as_list(e.get("achievements",[]))],
             })
     norm["experience"] = exp_norm
+
+    # Authoritative experience_years: sum of merged duration ranges.
+    # Trust this over whatever the AI returned (AI returned "3" for a
+    # 5-year resume in user testing).
+    if duration_strings:
+        recomputed = _calc_years_experience("\n".join(duration_strings))
+        if recomputed > 0:
+            norm["experience_years"] = recomputed
 
     # Education
     edu_norm: list[dict] = []
