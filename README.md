@@ -47,6 +47,25 @@ Open **http://localhost:8501** — done.
 
 ---
 
+## 📸 Screenshots
+
+### Upload Resume — drag & drop, configure search in sidebar
+![Upload Resume](docs/screenshots/01-upload-resume.png)
+
+### Job Matches — ranked LinkedIn jobs with match score, expandable description, optimise per-job
+![Job Matches](docs/screenshots/02-job-matches.png)
+
+### Optimised Resumes — full preview with before/after ATS score, PDF + Markdown download
+![Optimised Resumes](docs/screenshots/03-optimized-resumes.png)
+
+### Auto Apply — Selenium fills the form, pauses, you approve before submit
+![Auto Apply](docs/screenshots/04-auto-apply.png)
+
+### Report — ranked table, score chart, CSV export
+![Report](docs/screenshots/05-report.png)
+
+---
+
 ## ✨ Features
 
 - **Multi-format resume parsing** — PDF (native + OCR fallback), JPG, JPEG, PNG, SVG
