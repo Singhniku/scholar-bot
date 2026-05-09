@@ -1058,7 +1058,7 @@ with tab_jobs:
                               key=f"apply_dis_{jid}", use_container_width=True)
 
                 opt_clicked = bb.button(
-                    "✨ Optimize My Resume for This Job",
+                    "🎯 Upgrade CV with these Job Skills",
                     key=f"opt_{jid}",
                     use_container_width=True,
                     disabled=not has_ai,
@@ -1169,7 +1169,7 @@ with tab_resume:
     if not st.session_state.top_optimized:
         st.info(
             "No bulk-optimised resumes yet. Run the full pipeline with an AI key, "
-            "or use the **✨ Optimize My Resume for This Job** button on any job card."
+            "or use the **🎯 Upgrade CV with these Job Skills** button on any job card."
         )
     else:
         orig_ats = st.session_state.get("ats_audit", {}).get("score", 0)

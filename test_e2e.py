@@ -338,7 +338,64 @@ except Exception as e:
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 10. SUMMARY
+# 10. PIPELINE MODULE — clean end-to-end flow
+# ════════════════════════════════════════════════════════════════════════════
+header("10 · src/pipeline.py — orchestration")
+
+from src import pipeline
+
+# extract_resume_skills (no AI → falls back automatically)
+rd_p = pipeline.extract_resume_skills(RESUME_NIKITA, ai_client=None)
+case("pipeline_extract_skills")(rd_p["name"] == "NIKITA SINGH")
+case("pipeline_extract_3_roles")(len(rd_p["experience"]) == 3)
+
+# match_resume_to_jobs with synthetic job dicts (no network)
+fake_jobs = [
+    {"title":"Senior Python Eng","company":"Acme","description":
+     "We need Python, AWS, Docker, Kafka.","url":"u1","posted_date":None},
+    {"title":"COBOL Eng","company":"Old Co","description":
+     "Looking for COBOL and assembly.","url":"u2","posted_date":None},
+    {"title":"NoDescJob","company":"X","description":""},
+]
+scored = pipeline.match_resume_to_jobs(rd_p, fake_jobs, ai_client=None)
+case("pipeline_match_skips_no_desc")(len(scored) == 2,
+                                      f"got {len(scored)} (expected 2)")
+case("pipeline_match_python_higher_than_cobol")(
+    scored[0].match_score > scored[-1].match_score,
+    f"python={scored[0].match_score:.0f}% cobol={scored[-1].match_score:.0f}%"
+)
+case("pipeline_scoredjob_has_props")(
+    bool(scored[0].title) and bool(scored[0].company),
+    f"{scored[0].title} @ {scored[0].company}"
+)
+
+# filter_by_match
+above, below = pipeline.filter_by_match(scored, 30)
+case("pipeline_filter_split")(len(above) + len(below) == len(scored))
+
+# upgrade_cv requires AI — should raise without one
+try:
+    pipeline.upgrade_cv(rd_p, scored[0], ai_client=None)
+    case("pipeline_upgrade_requires_ai")(False, "did NOT raise")
+except RuntimeError as e:
+    case("pipeline_upgrade_requires_ai")("AI client" in str(e),
+                                          "raised correctly")
+
+# PipelineResult.summary()
+result_obj = pipeline.PipelineResult(
+    resume_data=rd_p, jobs_raw=fake_jobs, scored=scored,
+    above_threshold=above, below_threshold=below,
+    threshold_pct=30, used_ai=False,
+)
+summary = result_obj.summary()
+case("pipeline_summary_fields")(
+    {"total_jobs","scored","above_threshold","below_threshold",
+     "threshold_pct","best_score","avg_score","used_ai"} <= summary.keys()
+)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 11. SUMMARY
 # ════════════════════════════════════════════════════════════════════════════
 header("Summary")
 
