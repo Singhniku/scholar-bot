@@ -53,8 +53,11 @@ _PHONE_RE     = re.compile(r"(?<!\w)(\+?\d{1,3}[\s\-]?)?\(?\d{3,5}\)?[\s\-]?\d{3
 _LINKEDIN_RE  = re.compile(r"linkedin\.com/in/[a-zA-Z0-9\-_]+", re.I)
 
 _MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+# A "side" of a date range. Accepts:
+#   October 2024  ·  Oct 2024  ·  10/2024  ·  10-2024  ·  2024
+_DATE_SIDE = rf"(?:{_MONTH}\s+\d{{4}}|\d{{1,2}}[\/\-]\d{{4}}|\d{{4}})"
 _DATE_RANGE_RE = re.compile(
-    rf"({_MONTH}\s+\d{{4}}|\d{{4}})\s*[–\-—to]+\s*({_MONTH}\s+\d{{4}}|\d{{4}}|Present|Current)",
+    rf"({_DATE_SIDE})\s*(?:[–\-—]+|to|until|through)\s*({_DATE_SIDE}|Present|Current|Now|Today)",
     re.I,
 )
 
@@ -117,12 +120,19 @@ def _calc_years_experience(exp_section: str) -> int:
 
     def parse_date(s: str):
         s = s.strip().lower()
-        if s in ("present", "current"):
+        if s in ("present", "current", "now", "today"):
             return now
+        # "October 2024" / "Oct 2024"
         m = re.match(rf"({_MONTH})\s+(\d{{4}})", s, re.I)
         if m:
             mi = month_idx.get(m.group(1).lower()[:3], 1)
             return datetime(int(m.group(2)), mi, 1)
+        # "10/2024" or "10-2024"
+        m = re.match(r"(\d{1,2})[\/\-](\d{4})", s)
+        if m:
+            mo = max(1, min(12, int(m.group(1))))
+            return datetime(int(m.group(2)), mo, 1)
+        # "2024"
         m = re.match(r"(\d{4})", s)
         if m:
             return datetime(int(m.group(1)), 1, 1)
@@ -159,12 +169,16 @@ def _tenure_text(start_str: str, end_str: str) -> str:
 
     def parse(s):
         s = s.strip().lower()
-        if s in ("present", "current"):
+        if s in ("present", "current", "now", "today"):
             return now
         m = re.match(rf"({_MONTH})\s+(\d{{4}})", s, re.I)
         if m:
             return datetime(int(m.group(2)),
                             month_idx.get(m.group(1).lower()[:3], 1), 1)
+        m = re.match(r"(\d{1,2})[\/\-](\d{4})", s)
+        if m:
+            mo = max(1, min(12, int(m.group(1))))
+            return datetime(int(m.group(2)), mo, 1)
         m = re.match(r"(\d{4})", s)
         if m:
             return datetime(int(m.group(1)), 1, 1)
@@ -186,6 +200,7 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
     lines = [ln.rstrip() for ln in exp_section.split("\n")]
     entries: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    prev_nonbullet: str = ""
 
     for raw in lines:
         line = raw.strip()
@@ -195,9 +210,14 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
         date_m = _DATE_RANGE_RE.search(line)
 
         if not bullet and date_m:
+            # New experience block.
             if current:
                 entries.append(current)
-            company = _DATE_RANGE_RE.sub("", line).strip(" \t–-—|")
+            stripped = _DATE_RANGE_RE.sub("", line).strip(" \t–-—|,")
+
+            # Layout A: "Company    Date – Date" (company + date on same line)
+            # Layout B: "Date – Date" only — company is on previous line.
+            company = stripped if stripped else prev_nonbullet
             current = {
                 "title":    "",
                 "company":  company,
@@ -206,6 +226,7 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
                 "achievements": [],
                 "location": "",
             }
+            prev_nonbullet = ""
         elif current is not None and bullet:
             current["achievements"].append(line.lstrip("•-*◦▪· ").strip())
         elif current is not None and not current["title"]:
@@ -213,6 +234,11 @@ def _parse_experience(exp_section: str) -> list[dict[str, Any]]:
             current["title"] = parts[0].strip()
             if len(parts) > 1:
                 current["location"] = parts[1].strip()
+        else:
+            # Remember a non-bullet, non-date line in case the NEXT line
+            # is a date-only line referring back to it (Layout B).
+            if not bullet:
+                prev_nonbullet = line
 
     if current:
         entries.append(current)
@@ -360,6 +386,16 @@ def extract_resume(text: str) -> dict[str, Any]:
                 or sections.get("EXPERIENCE", ""))
     edu_text = sections.get("EDUCATION", "")
     skl_text = sections.get("TECHNICAL SKILLS") or sections.get("SKILLS", "")
+
+    # Headerless resume fallback — if no experience section was found but the
+    # text contains date ranges (typical for PDFs that lost section headers
+    # during column extraction), scan the whole text minus the education
+    # section for experience entries.
+    if not exp_text and _DATE_RANGE_RE.search(text):
+        scan_text = text
+        if edu_text:
+            scan_text = scan_text.replace(edu_text, "")
+        exp_text = scan_text
 
     lower = text.lower()
 
