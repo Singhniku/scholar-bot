@@ -6,6 +6,7 @@
 
 ---
 
+<<<<<<< HEAD
 ## Table of Contents
 
 1. [Demo](#demo)
@@ -227,18 +228,28 @@ scholar-bot/
 ## Clone & Setup
 
 ### 1. Clone the repository
+=======
+## ⚡ Quick Start (3 commands)
+>>>>>>> 2cdd351 (docs: add one-command setup.sh + simplified README quick-start)
 
 ```bash
 git clone https://github.com/Singhniku/scholar-bot.git
 cd scholar-bot
+./setup.sh
 ```
 
-### 2. Create a virtual environment (recommended)
+The setup script:
+- Creates a Python virtual environment (`.venv`)
+- Installs all dependencies
+- Offers to install Tesseract OCR (macOS via Homebrew)
+- Creates `.env` from `.env.example`
+- Prepares `output/` and `uploads/` folders
+
+Then add your free Gemini API key to `.env` and start the app:
 
 ```bash
-# macOS / Linux
-python3 -m venv .venv
 source .venv/bin/activate
+<<<<<<< HEAD
 
 # Windows (PowerShell)
 python -m venv .venv
@@ -315,267 +326,260 @@ OUTPUT_DIR=./output
 ### Web UI (recommended)
 
 ```bash
+=======
+>>>>>>> 2cdd351 (docs: add one-command setup.sh + simplified README quick-start)
 streamlit run app.py
 ```
 
-Opens at **http://localhost:8501**
+Open **http://localhost:8501** — done.
 
-To run on a specific port or expose on your network:
+> 🔑 **Get a free Gemini key** at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — takes 30 seconds, no credit card.
+> The free tier handles ~1500 requests/day which is more than enough.
 
-```bash
-streamlit run app.py --server.port 8080 --server.address 0.0.0.0
+---
+
+## 🚀 What it does
+
+| Tab | What it does |
+|-----|-------------|
+| 📄 **Upload Resume** | Parse PDF/JPG/PNG/SVG → extract skills → run ATS audit |
+| 💼 **Job Matches** | Browse LinkedIn jobs ranked by match score + recency |
+| ✏️ **Optimised Resumes** | Download ATS-tailored PDF / Markdown per job |
+| 🚀 **Auto Apply** | Bot fills LinkedIn Easy Apply → you review → submit |
+| 📊 **Report** | Full ranked table, score chart, CSV export |
+
+---
+
+## ✨ Features
+
+- **Multi-format resume parsing** — PDF (native + OCR fallback), JPG, JPEG, PNG, SVG
+- **Dual AI provider** — Google Gemini (free, default) or Anthropic Claude (paid)
+- **Keyword-only fallback mode** — fully usable when AI quota is exhausted
+- **LinkedIn job scraping** — searches public LinkedIn Jobs without an account
+- **Job-title search + match-% filter** — only shows jobs ≥ your chosen threshold
+- **ATS audit** — 7-rule keyword score + AI-powered bullet rewrites and gap analysis
+- **Resume optimisation** — bullets rewritten to mirror each job's exact keywords (no fabrication)
+- **Before/after ATS score** — see exactly how much the optimisation improved your score
+- **Auto Apply with human gate** — Selenium fills every form, pauses for your approval, only submits on click
+- **PDF + Markdown output** — single-column ATS-safe formatting, no images, no tables
+
+---
+
+## 📋 Prerequisites
+
+| Requirement | Minimum | Required for |
+|-------------|---------|--------------|
+| Python | 3.10+ | Everything |
+| Google Chrome | Recent | Auto Apply only |
+| Tesseract OCR | 4.x+ | Image / SVG resume parsing only — PDFs work without it |
+
+`./setup.sh` checks all of these and offers to install Tesseract on macOS.
+
+### API keys
+
+- **Google Gemini** (recommended, free) — [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+- **Anthropic Claude** (optional, paid) — [console.anthropic.com](https://console.anthropic.com)
+
+Set in `.env`:
+
+```dotenv
+AI_PROVIDER=gemini                    # or "anthropic"
+GOOGLE_API_KEY=AIza...                # required for AI mode
+ANTHROPIC_API_KEY=                    # only if AI_PROVIDER=anthropic
+
+# Optional — only needed for Auto Apply
+LINKEDIN_EMAIL=you@example.com
+LINKEDIN_PASSWORD=yourpassword
 ```
 
-### Headless server (no browser auto-open)
+> Without an AI key the app still works in **keyword mode** — jobs are still fetched, scored, and you can download a basic optimised resume.
+
+---
+
+## 🔧 Manual setup (alternative to `setup.sh`)
 
 ```bash
-streamlit run app.py --server.headless true
+git clone https://github.com/Singhniku/scholar-bot.git
+cd scholar-bot
+python3 -m venv .venv
+source .venv/bin/activate                 # Linux/macOS
+# .venv\Scripts\Activate.ps1              # Windows PowerShell
+pip install -r requirements.txt
+cp .env.example .env                       # then edit .env
+streamlit run app.py
+```
+
+Tesseract by platform:
+```bash
+# macOS
+brew install tesseract
+# Ubuntu / Debian
+sudo apt install tesseract-ocr
+# Windows: download installer from https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
 ---
 
-## CLI Usage
+## 🏗️ Architecture
 
-The CLI is useful for scripting or batch processing without the UI.
+```
+Resume file (PDF/JPG/PNG/SVG)
+    │
+    ▼
+ResumeParser              ← pdfplumber / pytesseract / cairosvg
+    │ raw text
+    ▼
+SkillsExtractor           ← Gemini or Claude  (fallback: regex parser)
+    │ structured JSON {skills, experience, education …}
+    ▼
+LinkedInScraper           ← requests + BeautifulSoup
+    │ job dicts {title, company, date, description, url}
+    ▼
+score_match               ← keyword overlap + ATS keyword scoring
+    │ {match_score, matched, missing}
+    ▼
+ATSOptimizer              ← Gemini or Claude (per job)
+    │ rewritten resume JSON
+    ▼
+ResumeGenerator           ← reportlab PDF + Markdown
+    │ files
+    ▼
+AutoApply                 ← Selenium (Easy Apply forms)
+    │ pre-filled form + screenshot
+    ▼
+Human review (Streamlit)  ─→ Submit / Skip
+```
+
+---
+
+## 📁 Project Structure
+
+```
+scholar-bot/
+├── app.py                    Streamlit web UI — 5 tabs, full pipeline
+├── main.py                   CLI entry point (alternative to UI)
+├── config.py                 Environment-based configuration
+├── setup.sh                  One-command setup script
+├── test_e2e.py               End-to-end test suite
+├── requirements.txt          All Python dependencies
+├── .env.example              Config template — copy to .env
+│
+├── src/
+│   ├── ai_client.py          Unified Gemini/Anthropic client
+│   ├── resume_parser.py      PDF / image / SVG → text
+│   ├── skills_extractor.py   AI: structured skill extraction + scoring
+│   ├── fallback_extractor.py Regex-based extraction (no AI)
+│   ├── linkedin_scraper.py   LinkedIn public-jobs scraper
+│   ├── ats_optimizer.py      AI: rewrite resume per job
+│   ├── resume_generator.py   reportlab PDF + Markdown
+│   └── auto_apply.py         Selenium Easy Apply bot
+│
+├── skills/                   Reusable test fixtures + 50+ unit tests
+└── output/  uploads/         Generated files (gitignored)
+```
+
+---
+
+## 🧪 Testing
 
 ```bash
-# Full pipeline: parse → match → optimise → generate outputs
-python main.py \
-  --resume /path/to/resume.pdf \
-  --location "San Francisco, CA" \
-  --jobs 50 \
-  --days 7 \
-  --optimize-top 3 \
-  --output-dir ./output
+source .venv/bin/activate
 
-# Resume analysis only (no LinkedIn scraping)
-python main.py --resume resume.jpg --no-linkedin
+# Full unit test suite (mocked AI — no network, no API key needed)
+pytest skills/ -v
+
+# End-to-end live test (uses your real API key + LinkedIn)
+python test_e2e.py
 ```
 
-### CLI arguments
-
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `--resume` | *(required)* | Path to resume file |
-| `--location` | `United States` | LinkedIn job search location |
-| `--jobs` | `50` | Max jobs to fetch |
-| `--days` | `30` | Recency filter: `1`, `7`, or `30` |
-| `--optimize-top` | `3` | Generate optimised resume for top N jobs |
-| `--output-dir` | `./output` | Where to save PDFs, reports, JSON |
-| `--no-linkedin` | off | Skip scraping, only analyse resume |
-
-### CLI outputs
-
-```
-output/
-├── 20260501_120000_1_SoftwareEngineer_Google.pdf     ← ATS-optimised resume
-├── 20260501_120000_1_SoftwareEngineer_Google.md      ← Markdown version
-├── 20260501_120000_2_DataEngineer_Meta.pdf
-├── 20260501_120000_2_DataEngineer_Meta.md
-├── 20260501_120000_3_MLEngineer_OpenAI.pdf
-├── 20260501_120000_3_MLEngineer_OpenAI.md
-├── 20260501_120000_job_report.md                     ← Full ranked job list
-└── 20260501_120000_analysis.json                     ← Machine-readable snapshot
-```
+`test_e2e.py` runs all 9 scenarios: fallback extraction, AI extraction, ATS audit, LinkedIn search (with/without title), scoring, PDF generation, AI optimisation, edge cases.
 
 ---
 
-## How Each Module Works
-
-### `src/resume_parser.py` — ResumeParser
-
-Detects file extension and routes to the correct parser:
-
-- **PDF** → `pdfplumber` extracts text layer + tables. Falls back to OCR via `pdf2image` + `pytesseract` if no text layer is found (scanned documents).
-- **JPG / JPEG / PNG** → Loads with `Pillow`, applies sharpening + contrast enhancement, then runs `pytesseract` with `--oem 3 --psm 6` (assumes uniform text block).
-- **SVG** → `cairosvg` renders to a 300 DPI PNG in memory, then same OCR path as images.
-
-### `src/skills_extractor.py` — SkillsExtractor
-
-Uses the Anthropic SDK with `cache_control: ephemeral` on the system prompt to reduce repeated token costs.
-
-- **`extract_from_resume(text)`** — Sends the raw resume text to Claude with a structured JSON schema prompt. Returns name, contact, skills by category, experience list, education, projects.
-- **`extract_from_job(description, title)`** — Extracts required skills, preferred skills, ATS keywords, seniority level from a job description.
-- **`calculate_match_score(resume_data, job_requirements)`** — Pure Python weighted scoring:
-  - Required skills matched: **70 points**
-  - Preferred skills matched: **20 points**
-  - ATS keyword coverage: **10 points**
-  - Experience gap bonus: **up to 10 points**
-  - Capped at 100.
-
-### `src/linkedin_scraper.py` — LinkedInScraper
-
-Scrapes LinkedIn's public `/jobs/search/` endpoint without authentication.
-
-1. **Session warmup** — Hits `linkedin.com` to receive cookies before the search.
-2. **Paginated search** — Fetches up to `num_jobs` results in pages of 25, with `sortBy=DD` (date descending) and a `f_TPR` time filter.
-3. **Card parsing** — Extracts title, company, location, date, URL from `<li class="job-search-card">` elements. Falls back to JSON-LD structured data (`<script type="application/ld+json">`).
-4. **Job enrichment** — Fetches the full job description from each job's individual page (limited to top 20 to stay within rate limits).
-5. **Relative date parsing** — Converts "2 days ago", "1 week ago" etc. to absolute `datetime` objects.
-
-> LinkedIn periodically changes its HTML. If scraping breaks, CSS selectors in `_SEL` and `_parse_card()` are the first place to update.
-
-### `src/ats_optimizer.py` — ATSOptimizer
-
-Sends resume JSON + job requirements JSON + match gap analysis to Claude AI with a strict prompt that:
-
-- Forbids adding skills the candidate does not have
-- Rewrites bullet points to mirror exact job keywords
-- Adds missing ATS keywords where they truthfully apply
-- Rewrites the summary to be keyword-dense and ATS-friendly
-- Returns `optimization_notes` (list of changes made) and `added_keywords`
-
-`bulk_optimize()` runs this for the top N jobs (default 3) and returns a list of `{job, optimized_resume, match_score}`.
-
-### `src/resume_generator.py` — ResumeGenerator
-
-Generates ATS-safe output using `reportlab`:
-
-- **PDF** — No tables, no images, no text boxes. Clean linear flow: Name → Contact → Summary → Skills → Experience → Projects → Education → Certifications. Uses `Helvetica` (universally readable by ATS parsers). Accent colour `#1e3a5f` for section headers.
-- **Markdown** — Plain Markdown version for easy editing or GitHub display.
-- **Job report** — Ranked Markdown file with match scores, dates, apply links, skills gaps.
-
-### `src/auto_apply.py` — AutoApply
-
-A Selenium-based LinkedIn Easy Apply bot designed to run in a background thread alongside Streamlit.
-
-**Key design decisions:**
-- `on_status(job_id, status, screenshot_b64)` callback allows the Streamlit UI to poll state without blocking.
-- `signal_submit(approve: bool)` + `threading.Event` creates a clean human-in-the-loop gate — the bot fills forms, takes a screenshot, then *blocks* until the user clicks Submit or Skip in the UI.
-- Anti-detection: `--disable-blink-features=AutomationControlled`, removes `navigator.webdriver`, uses realistic `User-Agent`.
-- Form filling uses label inference (`_infer_value`) to map field labels like "First Name", "Years of Experience", "City" to the correct resume data fields.
-- Radio button logic: auto-answers work authorisation questions (Yes) and sponsorship questions (No).
-
----
-
-## Auto-Apply Flow
+## 🤖 Auto-Apply Flow
 
 ```
 User clicks "Start Auto Apply"
         │
         ▼
-Background thread: AutoApply.apply_to_jobs(queue)
+Background thread fills each Easy Apply form
         │
-        ├─ Login to LinkedIn (email + password)
+        ▼
+Bot pauses, takes a screenshot, shows it in UI
         │
-        └─ For each job in queue:
-               │
-               ├─ Navigate to job URL
-               ├─ Click "Easy Apply" button
-               ├─ Fill Step 1: contact info, phone, location
-               ├─ Fill Step 2: work experience, years
-               ├─ Fill Step 3: upload PDF resume
-               ├─ Fill Step N: answer custom questions
-               │    (radio buttons, selects, free text)
-               │
-               ├─ Take full-page screenshot
-               │
-               ├─ STATUS → waiting_approval
-               │    (thread blocks on threading.Event)
-               │
-               │   ┌─────────────────────────────────────┐
-               │   │     Streamlit UI shows screenshot    │
-               │   │   [✅ Submit]     [⏭ Skip]          │
-               │   └────────────┬──────────┬─────────────┘
-               │                │          │
-               │           approve=True  approve=False
-               │                │          │
-               ├────────────────┘          └─ dismiss modal
-               │
-               ├─ Click "Submit application"
-               └─ STATUS → done
+        ▼
+User reviews → clicks ✅ Submit  or  ⏭ Skip
+        │
+        ▼
+Bot submits / dismisses, moves to next job
 ```
 
+The bot **never submits without your explicit approval** — `threading.Event` blocks until you click.
+
 ---
 
-## ATS Optimisation Logic
+## 📊 ATS Optimisation Logic
 
-Modern ATS (Applicant Tracking Systems) like Workday, Taleo, Greenhouse, Lever rank resumes by:
-
-1. **Keyword density** — exact matches to job description terms
-2. **Section recognition** — standard headers (EXPERIENCE, EDUCATION, SKILLS)
-3. **Parse-ability** — plain text, no tables, no columns, no images
-4. **Chronological ordering** — most recent experience first
-
-Scholar-Bot addresses all four:
-
-| ATS Factor | How Scholar-Bot handles it |
+| ATS factor | How Scholar-Bot handles it |
 |-----------|---------------------------|
-| Keywords | Claude mirrors exact phrasing from JD into bullets + summary |
-| Section headers | ALL CAPS standard headers, linear PDF flow |
+| Keyword density | AI mirrors exact phrasing from JD into bullets + summary |
+| Section headers | Standard ALL-CAPS headers, linear PDF flow |
 | Parse-ability | reportlab generates single-column, image-free PDF |
-| Ordering | Experience sorted by duration field as provided |
-| Missing skills | Claude adds keywords where truthfully applicable |
+| Ordering | Experience sorted by date, most recent first |
+| Missing skills | AI adds keywords only where truthfully applicable |
 
----
+The before/after ATS score (shown in the Optimised Resumes section) is computed from a 7-rule keyword audit:
 
-## Project Stats
-
-| Metric | Value |
-|--------|-------|
-| Total Python lines | 2,522 |
-| Source modules | 7 (+ app.py + main.py + config.py) |
-| UI tabs | 5 |
-| Supported resume formats | 5 (PDF, JPG, JPEG, PNG, SVG) |
-| AI model | `claude-sonnet-4-6` |
-| Prompt cache | Yes (ephemeral, system prompt) |
-| Output formats | PDF, Markdown, JSON, CSV |
-| Python version tested | 3.14.3 |
-
-### Dependencies
-
-| Package | Version | Category |
-|---------|---------|----------|
-| anthropic | 0.97.0 | AI / LLM |
-| streamlit | 1.57.0 | Web UI |
-| selenium | 4.43.0 | Browser automation |
-| webdriver-manager | 4.0.2 | Browser automation |
-| pdfplumber | 0.11.9 | Resume parsing |
-| pytesseract | 0.3.13 | OCR |
-| Pillow | 12.2.0 | Image processing |
-| CairoSVG | 2.9.0 | SVG rendering |
-| beautifulsoup4 | 4.14.3 | Web scraping |
-| requests | 2.33.1 | HTTP |
-| lxml | 6.1.0 | HTML parser |
-| reportlab | 4.5.0 | PDF generation |
-| python-dateutil | 2.9.0 | Date parsing |
-| pandas | 3.0.2 | Data / CSV |
-| python-dotenv | 1.0.1 | Config |
-
----
-
-## Limitations & Known Issues
-
-| Issue | Detail |
+| Check | Points |
 |-------|--------|
-| LinkedIn rate limiting | LinkedIn may return empty results if too many requests are made in a short window. Wait 5–10 minutes and try again. |
-| Easy Apply only | Auto Apply only works on jobs with LinkedIn's "Easy Apply" button. External application sites are not supported. |
-| CAPTCHA / 2FA | If LinkedIn shows a CAPTCHA or 2FA prompt during login, the bot cannot proceed. Solve it manually in the browser window (set `headless=False`). |
-| Tesseract accuracy | OCR accuracy depends on scan quality. Use a 300 DPI or higher scan for best results. |
-| SVG support | Only text-based SVG resumes work well. SVGs with embedded raster images may produce poor OCR output. |
-| LinkedIn HTML changes | LinkedIn periodically updates its HTML structure. If scraping stops working, update the CSS selectors in `_SEL` (linkedin_scraper.py line 25). |
+| Contact info (name + email + phone) | 20 |
+| Professional summary | 15 |
+| Skills section | 15 |
+| Work experience with bullets | 20 |
+| Education | 10 |
+| 10+ technical keywords | 10 |
+| Word count 400-1200 | 10 |
 
 ---
 
-## Roadmap
+## 🛠️ Tech Stack
 
-- [ ] Support for Indeed, Glassdoor, and Naukri job portals
-- [ ] Cover letter generation per job (Claude AI)
-- [ ] Application tracking dashboard with status history
-- [ ] Email alerts for new high-match jobs
-- [ ] Resume version history and diff view
-- [ ] Support for `.docx` resume input
-- [ ] Docker image for one-command deployment
+| Layer | Library |
+|-------|---------|
+| AI / LLM | `google-genai`, `anthropic` |
+| Resume parsing | `pdfplumber`, `pytesseract`, `Pillow`, `cairosvg` |
+| Scraping | `requests`, `beautifulsoup4`, `lxml`, `python-dateutil` |
+| Browser automation | `selenium`, `webdriver-manager` |
+| Output | `reportlab` (PDF), `pandas` (CSV) |
+| UI | `streamlit` |
+
+---
+
+## ⚠️ Limitations
+
+- **LinkedIn rate limiting** — too many requests in a short window returns empty results. Wait 5–10 min.
+- **Easy Apply only** — Auto Apply works on jobs with LinkedIn's "Easy Apply" button. External application sites are skipped.
+- **CAPTCHA / 2FA** — if LinkedIn challenges you, run with `headless=False` and solve manually.
+- **OCR quality** — depends on scan quality; use 300 DPI+ for best results on image resumes.
+- **HTML changes** — LinkedIn updates its markup occasionally; if scraping breaks, update selectors in `src/linkedin_scraper.py`.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Indeed / Glassdoor / Naukri scraping
+- [ ] AI-generated cover letter per job
+- [ ] Application tracking dashboard
+- [ ] `.docx` resume input
+- [ ] Docker image
 - [ ] Multi-language resume support
 
 ---
 
-## License
+## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-## Author
-
-Built with Claude AI (Anthropic) · [Scholar-Bot on GitHub](https://github.com/Singhniku/scholar-bot)
+**Built with Claude AI** · [scholar-bot on GitHub](https://github.com/Singhniku/scholar-bot)
