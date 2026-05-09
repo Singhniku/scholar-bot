@@ -280,6 +280,272 @@ def _normalize_resume(rd: Any) -> dict:
     return norm
 
 
+def _render_resume_viewer(rd: dict, *, key_prefix: str = "rv"):
+    """
+    Render a resume_data dict in a paper-resume layout: name, contact line,
+    summary, skills, work history with bullets, education, certifications.
+    Used for both the parsed Resume Snapshot and the Optimised Resume preview.
+    """
+    rd = rd or {}
+    name     = rd.get("name", "") or ""
+    email    = rd.get("email", "") or ""
+    phone    = rd.get("phone", "") or ""
+    loc      = rd.get("location", "") or ""
+    linkedin = rd.get("linkedin", "") or ""
+    contact  = " · ".join(p for p in [email, phone, loc, linkedin] if p)
+
+    # The resume "page" — single white container so it reads as a document
+    with st.container(border=True):
+        # Name banner
+        st.markdown(
+            f"<div style='font-size:2.0rem;font-weight:800;"
+            f"color:#1e3a5f;letter-spacing:.5px;line-height:1.1;"
+            f"padding-bottom:.2rem'>{name or 'Unnamed'}</div>",
+            unsafe_allow_html=True,
+        )
+        if contact:
+            st.markdown(
+                f"<div style='font-size:.9rem;color:#666;"
+                f"padding-bottom:.6rem;border-bottom:2px solid #1e3a5f'>"
+                f"{contact}</div>",
+                unsafe_allow_html=True,
+            )
+        # Title / current role line
+        if rd.get("current_title"):
+            st.markdown(
+                f"<div style='font-size:1.05rem;font-weight:600;color:#2d6a9f;"
+                f"padding:.5rem 0 .2rem 0'>{rd['current_title']}"
+                + (f" &nbsp;·&nbsp; <span style='color:#888;font-weight:400'>"
+                   f"{rd.get('experience_years',0)} yrs experience</span>"
+                   if rd.get('experience_years') else "")
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+
+        def section(title):
+            st.markdown(
+                f"<div style='font-size:.95rem;font-weight:700;color:#1e3a5f;"
+                f"text-transform:uppercase;letter-spacing:1px;"
+                f"border-bottom:1px solid #dce6f5;padding:.7rem 0 .25rem 0;"
+                f"margin-top:.4rem'>{title}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # Summary
+        if rd.get("summary"):
+            section("Professional Summary")
+            st.markdown(
+                f"<div style='font-size:.92rem;color:#222;line-height:1.4;"
+                f"padding:.3rem 0'>{rd['summary']}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # Skills
+        all_tech = list(dict.fromkeys(
+            (rd.get("technical_skills", []) or []) +
+            (rd.get("frameworks", [])      or []) +
+            (rd.get("tools", [])           or []) +
+            (rd.get("languages", [])       or [])))
+        soft = rd.get("soft_skills", []) or []
+        if all_tech or soft:
+            section("Skills")
+            if all_tech:
+                st.markdown(
+                    "<div style='padding:.3rem 0'>"
+                    + " ".join(f'<span class="badge badge-blue">{s}</span>'
+                                for s in all_tech)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+            if soft:
+                st.markdown(
+                    f"<div style='font-size:.85rem;color:#555;padding:.2rem 0'>"
+                    f"<b>Soft skills:</b> {', '.join(soft)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Experience
+        if rd.get("experience"):
+            section(f"Work Experience  ·  {len(rd['experience'])} roles  ·  "
+                    f"{rd.get('experience_years', 0)} yrs total")
+            for exp in rd["experience"]:
+                title    = exp.get("title", "")    or ""
+                company  = exp.get("company", "")  or ""
+                duration = exp.get("duration", "") or ""
+                tenure   = exp.get("tenure", "")   or ""
+                location = exp.get("location", "") or ""
+
+                head = " — ".join(p for p in [title, company] if p)
+                meta = " · ".join(p for p in [
+                    duration, (f"⏱ {tenure}" if tenure else ""),
+                    (f"📍 {location}" if location else "")] if p)
+
+                st.markdown(
+                    f"<div style='padding:.4rem 0 .1rem 0'>"
+                    f"<span style='font-weight:600;color:#1e3a5f;font-size:1rem'>"
+                    f"{head}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                if meta:
+                    st.markdown(
+                        f"<div style='color:#666;font-size:.82rem;"
+                        f"padding-bottom:.3rem'>{meta}</div>",
+                        unsafe_allow_html=True,
+                    )
+                for ach in exp.get("achievements", []) or []:
+                    st.markdown(
+                        f"<div style='padding-left:1.2rem;font-size:.9rem;"
+                        f"line-height:1.45;color:#222;text-indent:-.7rem'>"
+                        f"• {ach}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+        # Projects
+        if rd.get("projects"):
+            section("Projects")
+            for proj in rd["projects"]:
+                techs = ", ".join(proj.get("technologies", []) or [])
+                st.markdown(
+                    f"<div style='padding:.3rem 0'>"
+                    f"<span style='font-weight:600;color:#1e3a5f'>"
+                    f"{proj.get('name','')}</span>"
+                    + (f" <span style='color:#888;font-size:.8rem'>"
+                       f"[{techs}]</span>" if techs else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+                if proj.get("description"):
+                    st.markdown(
+                        f"<div style='padding-left:1.2rem;font-size:.9rem;"
+                        f"color:#222'>{proj['description']}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+        # Education
+        if rd.get("education"):
+            section("Education")
+            for edu in rd["education"]:
+                head = edu.get("institution", "")
+                meta = " · ".join(p for p in [
+                    edu.get("degree", ""), edu.get("year", ""),
+                    edu.get("gpa", "")] if p)
+                st.markdown(
+                    f"<div style='padding:.3rem 0'>"
+                    f"<span style='font-weight:600;color:#1e3a5f'>{head}</span>"
+                    + (f"<div style='color:#666;font-size:.82rem'>{meta}</div>"
+                       if meta else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+        # Certifications
+        if rd.get("certifications"):
+            section("Certifications")
+            for cert in rd["certifications"]:
+                st.markdown(
+                    f"<div style='padding:.15rem 0 .15rem 1.2rem;"
+                    f"font-size:.9rem;text-indent:-.7rem'>• {cert}</div>",
+                    unsafe_allow_html=True,
+                )
+
+
+def _merge_optimized_with_original(opt_res: dict, original: dict) -> dict:
+    """
+    AI optimisers often drop fields they're not actively rewriting (education,
+    projects, certifications, even tools/frameworks). They also occasionally
+    return achievements as plain strings or with the original bullets stripped.
+
+    This merger keeps the AI's rewrites where present and falls back to the
+    original resume for anything the AI dropped — so the rendered/downloaded
+    resume is always at least as complete as what the user uploaded.
+    """
+    if not isinstance(opt_res, dict) or not isinstance(original, dict):
+        return opt_res or {}
+
+    merged = dict(opt_res)
+
+    # Contact + identity — always prefer the original (AI sometimes blanks these)
+    for key in ("name", "email", "phone", "location", "linkedin"):
+        if not merged.get(key) and original.get(key):
+            merged[key] = original[key]
+
+    # Lists — restore from original when AI returned empty/missing
+    for key in ("education", "projects", "certifications",
+                 "soft_skills", "languages", "frameworks", "tools"):
+        if not merged.get(key) and original.get(key):
+            merged[key] = original[key]
+
+    # Experience — keep AI version if it has content, but for each role
+    # ensure the bullets aren't empty (fall back to original's bullets for
+    # the matching company).
+    ai_exp = merged.get("experience") or []
+    orig_exp = original.get("experience") or []
+
+    if not ai_exp and orig_exp:
+        merged["experience"] = orig_exp
+    else:
+        orig_by_company = {(e.get("company","") or "").lower(): e
+                            for e in orig_exp}
+        fixed: list[dict] = []
+        for e in ai_exp:
+            if not isinstance(e, dict):
+                continue
+            ec = e if e.get("achievements") else dict(e)
+            if not ec.get("achievements"):
+                fb = orig_by_company.get((e.get("company","") or "").lower())
+                if fb and fb.get("achievements"):
+                    ec["achievements"] = list(fb["achievements"])
+            # Carry over duration/tenure/location if AI dropped them
+            fb = orig_by_company.get((e.get("company","") or "").lower())
+            if fb:
+                for k in ("duration","tenure","location"):
+                    if not ec.get(k) and fb.get(k):
+                        ec[k] = fb[k]
+            fixed.append(ec)
+        merged["experience"] = fixed
+
+    # Always carry the resume_data's all_keywords so the ATS keyword count
+    # check has data to work with.
+    if not merged.get("all_keywords") and original.get("all_keywords"):
+        merged["all_keywords"] = original["all_keywords"]
+
+    # Make sure technical_skills is a non-empty union of both
+    orig_tech = list(original.get("technical_skills", []) or [])
+    ai_tech   = list(merged.get("technical_skills", []) or [])
+    seen = {s.lower() for s in ai_tech}
+    for s in orig_tech:
+        if s.lower() not in seen:
+            ai_tech.append(s); seen.add(s.lower())
+    merged["technical_skills"] = ai_tech
+
+    # If AI didn't supply optimization_notes / added_keywords, infer them
+    if not merged.get("optimization_notes"):
+        notes = []
+        if merged.get("summary") and merged.get("summary") != original.get("summary"):
+            notes.append("Rewrote professional summary to mirror job keywords.")
+        if len(ai_tech) > len(orig_tech):
+            notes.append(f"Added {len(ai_tech) - len(orig_tech)} new "
+                          f"keywords to the skills section.")
+        for new_e, old_e in zip(merged.get("experience", []), orig_exp):
+            new_a = new_e.get("achievements", [])
+            old_a = old_e.get("achievements", [])
+            if new_a != old_a:
+                notes.append(
+                    f"Rewrote {len(new_a)} bullet points for "
+                    f"{new_e.get('company','this role')}.")
+                break
+        if not notes:
+            notes.append("Resume keywords aligned to the target job description.")
+        merged["optimization_notes"] = notes
+
+    if not merged.get("added_keywords"):
+        new_skills = [s for s in ai_tech if s.lower() not in
+                       {x.lower() for x in orig_tech}]
+        merged["added_keywords"] = new_skills[:12]
+
+    return merged
+
+
 def _ats_score_from_dict(opt_res: dict) -> int:
     """Compute keyword ATS score directly from an optimised resume dict."""
     text = " ".join([
@@ -336,71 +602,9 @@ def _render_opt_resume(opt_res: dict, original_ats: int, job_title: str,
 
     st.divider()
 
-    # ── Full resume preview ───────────────────────────────────────────────────
+    # ── Full resume preview (paper-resume style) ─────────────────────────────
     st.markdown("#### Optimised Resume Preview")
-
-    name    = opt_res.get("name","")
-    email   = opt_res.get("email","")
-    phone   = opt_res.get("phone","")
-    loc     = opt_res.get("location","")
-    li_url  = opt_res.get("linkedin_url","")
-    contact = " | ".join(p for p in [email, phone, loc, li_url] if p)
-
-    st.markdown(f"## {name}")
-    if contact:
-        st.caption(contact)
-
-    if opt_res.get("summary"):
-        st.markdown("**Professional Summary**")
-        st.info(opt_res["summary"])
-
-    # Skills
-    all_tech = list(dict.fromkeys(
-        opt_res.get("technical_skills",[]) +
-        opt_res.get("frameworks",[]) +
-        opt_res.get("tools",[]) +
-        opt_res.get("languages",[])))
-    if all_tech:
-        st.markdown("**Skills**")
-        st.markdown(
-            " ".join(f'<span class="badge badge-blue">{s}</span>' for s in all_tech),
-            unsafe_allow_html=True)
-        if opt_res.get("soft_skills"):
-            st.caption("Soft skills: " + ", ".join(opt_res["soft_skills"]))
-
-    # Experience
-    if opt_res.get("experience"):
-        st.markdown("**Work Experience**")
-        for exp in opt_res["experience"]:
-            st.markdown(
-                f"**{exp.get('title','')}** — {exp.get('company','')}  "
-                f"*{exp.get('duration','')}*")
-            for ach in exp.get("achievements",[]):
-                st.markdown(f"&nbsp;&nbsp;• {ach}")
-
-    # Projects
-    if opt_res.get("projects"):
-        st.markdown("**Projects**")
-        for proj in opt_res["projects"]:
-            techs = ", ".join(proj.get("technologies",[]))
-            st.markdown(f"**{proj.get('name','')}** `[{techs}]`")
-            if proj.get("description"):
-                st.markdown(f"&nbsp;&nbsp;{proj['description']}")
-
-    # Education
-    if opt_res.get("education"):
-        st.markdown("**Education**")
-        for edu in opt_res["education"]:
-            st.markdown(
-                f"**{edu.get('degree','')}** — {edu.get('institution','')}  "
-                f"{edu.get('year','')}")
-
-    # Certifications
-    if opt_res.get("certifications"):
-        st.markdown("**Certifications**")
-        for cert in opt_res["certifications"]:
-            st.markdown(f"• {cert}")
-
+    _render_resume_viewer(opt_res, key_prefix=key_prefix)
     st.divider()
 
     # ── What changed ─────────────────────────────────────────────────────────
@@ -867,66 +1071,17 @@ with tab_upload:
         rd  = st.session_state.resume_data
         ats = st.session_state.get("ats_audit") or {}
         st.divider()
-        st.markdown("#### Resume Snapshot"
+        st.markdown("#### Parsed Resume"
                     + (" *(keyword mode)*" if rd.get("_fallback") else ""))
 
-        c1,c2,c3,c4 = st.columns(4)
-        c1.metric("Name",  rd.get("name","—"))
-        c2.metric("Role",  rd.get("current_title","—"))
-        c3.metric("Exp",   f"{rd.get('experience_years','?')} yrs")
-        c4.metric("Email", rd.get("email","—"))
+        # Compact summary metrics — quick stats above the resume viewer
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Roles",        len(rd.get("experience", [])))
+        c2.metric("Years exp",    f"{rd.get('experience_years','?')} yrs")
+        c3.metric("Skills",       len(rd.get("technical_skills", []) or []))
 
-        all_sk = list(dict.fromkeys(
-            rd.get("technical_skills",[]) + rd.get("frameworks",[]) + rd.get("tools",[])))
-        if all_sk:
-            st.markdown("**Detected Skills**")
-            st.markdown(
-                " ".join(f'<span class="badge badge-blue">{s}</span>' for s in all_sk),
-                unsafe_allow_html=True)
-        if rd.get("summary"):
-            st.info(rd["summary"][:400])
-
-        if rd.get("experience"):
-            num_roles = len(rd["experience"])
-            with st.expander(
-                f"💼 Work Experience  ·  {num_roles} role"
-                f"{'s' if num_roles != 1 else ''}  ·  "
-                f"{rd.get('experience_years', 0)} yrs total",
-                expanded=True,
-            ):
-                for exp in rd["experience"]:
-                    title    = exp.get("title", "")
-                    company  = exp.get("company", "")
-                    duration = exp.get("duration", "")
-                    tenure   = exp.get("tenure", "")
-                    location = exp.get("location", "")
-                    head_bits = " — ".join(b for b in [title, company] if b)
-                    sub_parts = []
-                    if duration: sub_parts.append(duration)
-                    if tenure:   sub_parts.append(f"⏱ {tenure}")
-                    if location: sub_parts.append(f"📍 {location}")
-                    if head_bits:
-                        st.markdown(f"**{head_bits}**")
-                    if sub_parts:
-                        st.caption(" · ".join(sub_parts))
-                    for ach in exp.get("achievements", []):
-                        st.markdown(f"&nbsp;&nbsp;• {ach}")
-                    st.markdown("")
-
-        if rd.get("education"):
-            with st.expander(
-                f"🎓 Education  ·  {len(rd['education'])} entries",
-                expanded=False,
-            ):
-                for edu in rd["education"]:
-                    head = edu.get("institution", "")
-                    sub  = " · ".join(b for b in [
-                        edu.get("degree",""), edu.get("year",""), edu.get("gpa",""),
-                    ] if b)
-                    if head:
-                        st.markdown(f"**{head}**")
-                    if sub:
-                        st.caption(sub)
+        # Render the parsed resume in proper resume-viewer layout
+        _render_resume_viewer(rd, key_prefix="snapshot")
 
         # ── ATS Score panel ───────────────────────────────────────────────────
         if ats:
@@ -1187,6 +1342,9 @@ with tab_jobs:
 
                 if jid in st.session_state.per_job_opt:
                     opt_res = st.session_state.per_job_opt[jid]
+                    # Merge with original so nothing the AI dropped is lost
+                    opt_res = _merge_optimized_with_original(
+                        opt_res, st.session_state.resume_data or {})
                     with st.expander("📄 Optimised Resume — Full Preview & Download",
                                      expanded=True):
                         orig_ats = st.session_state.get("ats_audit", {}).get("score", 0)
@@ -1251,8 +1409,10 @@ with tab_resume:
                 with h2:
                     st.markdown(score_badge(score), unsafe_allow_html=True)
 
+                opt_merged = _merge_optimized_with_original(
+                    opt, st.session_state.resume_data or {})
                 _render_opt_resume(
-                    opt, orig_ats, jtitle, jcompany,
+                    opt_merged, orig_ats, jtitle, jcompany,
                     job.get("url",""), key_prefix=f"bulk_{i}")
 
 
